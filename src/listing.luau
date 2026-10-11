@@ -7,10 +7,10 @@ The YAML `jess nif dump` wrote its records in, one list item at a time: jess's o
 serde_yaml's. A list of scalars is written inline when it is all numbers or fits in a hundred
 columns, text with a line break in it is a literal block, a string is quoted only when it could
 be read as something else, and a float is spelled the shortest way that reads back as the same
-value. Values are `@vfs/serialize`'s: its arrays, its ordered maps, its absent option.
+value. Values are `@jess/data/value`'s: its arrays, its ordered maps, its absent option.
 ]]
 
-local serialize = require '@vfs/serialize'
+local serialize = require '@jess/data/value'
 
 type Value = serialize.Value
 

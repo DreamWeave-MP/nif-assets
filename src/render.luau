@@ -20,7 +20,7 @@ float with no fraction is written as a whole number.
 
 local commands = require './commands'
 local listing = require './listing'
-local serialize = require '@vfs/serialize'
+local serialize = require '@jess/data/value'
 
 type Value = serialize.Value
 
