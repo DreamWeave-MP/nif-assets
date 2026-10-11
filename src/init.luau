@@ -192,6 +192,8 @@ local function dataRoot(path: string): (string?, string)
   return root, normalize(table.concat(parts, '/', position))
 end
 
+--- Sources over `base`, the load order's VFS when there is one, with nothing to read yet: for a
+--- caller that names the models itself, with `addVfsTarget`, rather than reading every one.
 local function newSources(base: Vfs.VFS?): Sources
   return { inputs = {}, base = base, targets = {}, targeted = {} }
 end
@@ -862,6 +864,7 @@ return table.freeze {
   isNifPath = isNifPath,
   texturePath = texturePath,
   resourcePath = resourcePath,
+  new = newSources,
   sources = sources,
   addData = addData,
   add = add,

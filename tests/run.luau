@@ -459,6 +459,32 @@ suite.describe('sources', function()
     expect(#made.targets).toBe(1)
   end)
 
+  suite.it('start empty over a load order, for models named one by one', function()
+    local root = tree('named', {
+      ['data/meshes/b/loose.nif'] = shape 'tx_a.tga',
+      ['data/meshes/b/other.nif'] = shape(),
+      ['data/textures/tx_a.dds'] = 'loose',
+    })
+    local data = jess.fs.join(root, 'data')
+    local made = assets.new(vfs.VFS.fromDirectories { data })
+    expect(made.targets).toEqual {}
+    expect(made.inputs).toEqual {}
+    expect(assets.check(made).summary.files).toBe(0)
+
+    expect(assets.addVfsTarget(made, 'meshes/b/loose.nif')).toBe(true)
+    local report = assets.check(made)
+    expect(report.summary.loadOrderChecked).toBe(true)
+    expect(#report.files).toBe(1)
+    expect(report.files[1].path).toBe 'meshes/b/loose.nif'
+    expect(report.files[1].source).toBe(jess.fs.join(data, 'meshes/b/loose.nif'))
+    expect(report.files[1].textures[1].resolved).toBe 'textures/tx_a.dds'
+
+    -- Without a load order there is nowhere to look a path up.
+    local empty = assets.new()
+    expect(assets.addVfsTarget(empty, 'meshes/b/loose.nif')).toBe(false)
+    expect(empty.base).toBeNil()
+  end)
+
   suite.it('refuse what is not there and what is not a NIF', function()
     local root = mod 'refusals'
     local notes = jess.fs.join(root, 'mod/Meshes/y/notes.txt')
