@@ -5,7 +5,9 @@
 --[[
 A command's result as the document `jess nif` printed for it: the same fields in the same order,
 field names and codes in snake_case (`wont_load`, `missing_texture`), an absent value as `null`
-in YAML and JSON and left out of TOML. Data in, text out: nothing here opens a file.
+in YAML and JSON and left out of TOML. Data in, text out: nothing here opens a file. The one
+absent value TOML can't leave out is a dump's root that names no record, an entry of a list:
+that is -1 there, where `jess nif dump` failed with "unsupported None value".
 
 YAML and TOML documents end with a line break of their own, and JSON is one line with one added,
 so a document goes to standard output exactly as it is returned.
@@ -399,16 +401,17 @@ local function plainValue(plain: unknown, record: boolean): Value
   return out
 end
 
---- The fields before a dump's records: where the NIF is from, and its roots by record index,
---- null for a root that names no record.
-local function dumpHeader(result: commands.DumpResult): serialize.Map
+--- The fields before a dump's records: where the NIF is from, and its roots by record index. A
+--- root that names no record is null, except in TOML, which has no null and can't leave an entry
+--- out of a list without moving the ones after it: there it is -1, as the file itself spells it.
+local function dumpHeader(result: commands.DumpResult, format: Format): serialize.Map
   return serialize.struct {
     { 'path', result.path },
     { 'source', result.source },
     {
       'roots',
       list(result.roots, function(root: number): Value
-        return if root < 0 then serialize.None else root
+        return if root >= 0 or format == 'toml' then root else serialize.None
       end),
     },
   }
@@ -417,7 +420,7 @@ end
 --- A dump: its header, then `records`. In YAML the records are written by jess's own list
 --- writer, as `jess nif dump` streamed them.
 local function dump(result: commands.DumpResult, format: Format): string
-  local header = dumpHeader(result)
+  local header = dumpHeader(result, format)
   local records = table.create(#result.records) :: { Value }
   for index, record in result.records do
     records[index] = plainValue(record, true)

@@ -411,9 +411,9 @@ suite.describe('render', function()
     expect(cli.render(results.dumped)).toBe(golden 'dump.yaml')
     expect(cli.render(results.dumped, { format = 'json' })).toBe(golden 'dump.json')
 
-    local rooted = table.clone(results.dumped)
-    rooted.roots = { 2 }
-    expect(cli.render(rooted, { format = 'toml' })).toBe(golden 'dump.toml')
+    -- A root that names no record is null, and in TOML, which has no null, the file's own -1.
+    expect(results.dumped.roots).toEqual { 2, -1 }
+    expect(cli.render(results.dumped, { format = 'toml' })).toBe(golden 'dump.toml')
 
     local empty = table.clone(results.dumped)
     empty.roots, empty.records = {}, {}
@@ -558,6 +558,12 @@ suite.describe('run', function()
     expect(cli.run { 'dump', '--list', rock }).toBe(0)
     expect(cli.run { 'dump', '--format', 'json', '-t', 'ninode', '--index', '2', '--name', 'rock', rock }).toBe(0)
     expect(cli.run { 'dump', '--format', 'toml', '--type', 'NiNode', rock }).toBe(0)
+
+    local unrooted = jess.fs.join(root, 'meshes/unrooted.nif')
+    jess.fs.write(unrooted, support.unrooted())
+    for _, format in { 'yaml', 'json', 'toml' } do
+      expect({ format, cli.run { 'dump', '--format', format, unrooted } }).toEqual { format, 0 }
+    end
   end)
 
   suite.it('fixes one loose file in place after a backup, and into a folder', function()

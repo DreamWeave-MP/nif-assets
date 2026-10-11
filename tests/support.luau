@@ -59,6 +59,14 @@ local function node(): buffer
   return file:save()
 end
 
+--- A node, and after it a root that names no record.
+local function unrooted(): buffer
+  local file = nif.new()
+  file.roots = { file:insert { type = 'NiNode' }, -1 }
+
+  return file:save()
+end
+
 --- A fresh folder `name` under the scratch root's `suite` folder, holding `files` by their paths
 --- below it.
 local function tree(suite: string, name: string, files: { [string]: string | buffer }): string
@@ -132,6 +140,7 @@ return table.freeze {
   rug = rug,
   textured = textured,
   node = node,
+  unrooted = unrooted,
   tree = tree,
   dataFolder = dataFolder,
   skyrim = Skyrim,
