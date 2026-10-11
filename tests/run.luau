@@ -739,6 +739,58 @@ suite.describe('check', function()
     }
   end)
 
+  -- jess-assets' own contract for the NIF check (`contracts/assets` in jess's history): one model
+  -- under a data folder's meshes, its texture beside them, checked as a folder and as a file with
+  -- its data folder named.
+  suite.it('gives jess.nif.check\'s pinned answers for a folder and for a file with its data', function()
+    local root = tree('contract', { ['data/textures/tx_rock.dds'] = 'DDS ' })
+    local data = jess.fs.join(root, 'data')
+    local file = nif.new()
+    local rock = file:insert { type = 'NiNode', name = 'Rock' }
+    file.roots = { rock }
+    file:shape {
+      parent = rock,
+      vertices = Triangle,
+      triangles = { { 0, 1, 2 } },
+      texture = 'tx_rock.tga',
+    }
+    jess.fs.write(jess.fs.join(data, 'meshes/jess/rock.nif'), file:save())
+
+    local texture = {
+      path = 'tx_rock.tga',
+      resolved = 'textures/tx_rock.dds',
+      source = jess.fs.join(data, 'textures/tx_rock.dds'),
+    }
+
+    expect(assets.check(assets.sources(nil, nil, { jess.fs.join(data, 'meshes') }))).toEqual {
+      summary = {
+        texturesChecked = true,
+        loadOrderChecked = false,
+        files = 1,
+        deeplyChecked = 1,
+        wontLoad = 0,
+        byWorstSeverity = {},
+        byCode = {},
+      },
+      files = {
+        {
+          path = 'meshes/jess/rock.nif',
+          source = data,
+          version = '4.0.0.2',
+          game = 'Morrowind',
+          deeplyChecked = true,
+          findings = {},
+          textures = { texture },
+          stats = ShapeStats,
+        },
+      },
+    }
+
+    local elsewhere =
+      assets.check(assets.sources(nil, { data }, { jess.fs.join(data, 'meshes/jess/rock.nif') }))
+    expect(elsewhere.files[1].textures).toEqual { texture }
+  end)
+
   suite.it('shows a report down to a severity, counting everything still', function()
     local root = mod 'shown'
     local report = assets.check(assets.sources(nil, nil, { jess.fs.join(root, 'mod/Meshes/x') }))
