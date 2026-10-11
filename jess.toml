@@ -4,8 +4,9 @@ manifest_version = 1
 id = "org.dreamweave.nif-assets"
 version = "0.1.0"
 jess_api = "1"
+default_target = "nif-assets"
 include = ["src"]
-tests = ["tests/run.luau", "tests/commands.luau", "tests/style.luau"]
+tests = ["tests/run.luau", "tests/commands.luau", "tests/cli.luau", "tests/style.luau"]
 
 [dependencies]
 "org.dreamweave.nif" = "0.1"
@@ -18,13 +19,28 @@ tests = ["tests/run.luau", "tests/commands.luau", "tests/style.luau"]
 [modules]
 "@nif-assets" = "src/init.luau"
 "@nif-assets/commands" = "src/commands.luau"
+"@nif-assets/cli" = "src/cli.luau"
 
 # Every module here is inert API: it does nothing until something requires it, and runs with the
 # authority of whatever calls it. The library's reports read data folders, archives, and NIFs, and
 # `fix` writes the files it repairs. `@nif-assets/commands` is what a front end calls: one
-# function per command, a request of plain data in and a result of plain data out.
+# function per command, a request of plain data in and a result of plain data out. `@nif-assets/cli`
+# is the command line over it.
 
 [[layer]]
 id = "nif-assets.core"
 requires = ["nif.core", "vfs.core"]
-exports = ["@nif-assets", "@nif-assets/commands"]
+exports = ["@nif-assets", "@nif-assets/commands", "@nif-assets/cli"]
+
+# The command line `jess nif` was: `src/main.luau` hands its arguments to `@nif-assets/cli`. A run
+# reads the inputs and the --data folders and archives: their listings, the NIFs, and whether each
+# texture a NIF names is there (filesystem.read). `fix` makes the folders a fixed file goes in,
+# copies the file it is about to write over to a backup, and writes the fixed file
+# (filesystem.write); `check`, `info`, and `dump` write nothing. It reads no environment: there is
+# no load order behind it, so no OPENMW_CONFIG. It runs no other program and opens no connection.
+
+[targets.nif-assets]
+kind = "command"
+command = "nif-assets"
+entry = "src/main.luau"
+capabilities = ["filesystem.read", "filesystem.write"]

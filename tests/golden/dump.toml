@@ -1,0 +1,66 @@
+path = "meshes/rock.nif"
+source = "/mods/rock/meshes/rock.nif"
+roots = [2]
+
+[[records]]
+index = 1
+type = "NiTriShape"
+name = "Tri Rock"
+flags = 4
+geometry_data = 0
+is_static = true
+note = """
+line one
+line two"""
+pixel_layout = "Palettized4"
+properties = []
+rotation = [
+    [
+    1,
+    0,
+    0,
+],
+    [
+    0,
+    1,
+    0,
+],
+    [
+    0,
+    0,
+    1,
+],
+]
+scale = 1.5
+translation = [
+    0,
+    0.10000000149011612,
+    -276.1847839355469,
+]
+use_mipmaps = "Yes"
+
+[records.bound]
+center = [
+    0,
+    0,
+    0,
+]
+radius = 141.42135620117188
+
+[[records.keys]]
+time = 0
+value = 0.0000001
+
+[[records.keys]]
+time = 0.5
+value = 340282346638528860000000000000000000000.0
+
+[records.source]
+external = 'Textures\Tx_Rock.tga'
+
+[[records]]
+index = 2
+type = "NiNode"
+name = ""
+children = [1]
+label = "Seyda Neen, Arrille"

@@ -1,0 +1,610 @@
+--!strict
+--!native
+-- `@nif-assets/cli`: the argument lists it reads into requests and the ones it refuses, the
+-- document it renders for a result written out by hand, the status and the complaint of each
+-- outcome, and whole runs through `run` over the harness's data folder. A run's document goes to
+-- the suite's own standard output and its messages to its standard error; what is asserted is
+-- the status and what the run left on disk.
+local cli = require '@nif-assets/cli'
+local commands = require '@nif-assets/commands'
+local nif = require '@nif'
+local results = require './results'
+local support = require './support'
+local test = require '@jess/test'
+
+local expect = test.expect
+local suite = test.new()
+
+local Suite = 'nif-assets-cli'
+
+--- Where this file is, from its chunk name: the folder the suite and its goldens are in.
+local function here(): string
+  local source = debug.info(1, 's')
+  local first = string.sub(source, 1, 1)
+  local path = if first == '@' or first == '=' then string.sub(source, 2) else source
+
+  return string.match(path, '^(.*)/[^/]*$') or '.'
+end
+
+local Here = here()
+
+local function golden(name: string): string
+  local path = `{Here}/golden/{name}`
+  return jess.fs.read(path) or error(`can't read {path}`, 0)
+end
+
+local function parsed(argv: { string }): cli.Command
+  local command, message = cli.parse(argv)
+  return command or error(message, 0)
+end
+
+local Modify = 'modify can\'t run: a package can\'t load a Luau script it is handed when it runs, so'
+  .. ' there is nothing to give --script to. @nif-assets/commands\' modify takes the edit as a'
+  .. ' function; a script of your own, run with jess run, requires it and passes the edit in'
+
+local NoInput = ' requires at least one input: a NIF or KF file, a data folder, or an archive'
+
+-- Each argument list `parse` refuses, and what it says of it.
+local Refused: { { argv: { string }, message: string } } = {
+  { argv = {}, message = 'a command is required' },
+  { argv = { '--format', 'json' }, message = 'a command is required' },
+  { argv = { '--' }, message = 'a command is required' },
+  { argv = { 'lint', 'a.nif' }, message = 'unknown command \'lint\'' },
+  { argv = { 'Check', 'a.nif' }, message = 'unknown command \'Check\'' },
+  { argv = { '--bogus', 'check', 'a.nif' }, message = 'unknown option \'--bogus\'' },
+  { argv = { '-v', 'check', 'a.nif' }, message = 'unknown option \'-v\'' },
+  { argv = { 'modify', '--script', 'edit.luau', 'a.nif' }, message = Modify },
+  { argv = { 'modify' }, message = Modify },
+  {
+    argv = { 'completions', 'bash' },
+    message = 'completions isn\'t a command of nif-assets: shell completions were jess\'s own, and this command generates none',
+  },
+  {
+    argv = { 'man' },
+    message = 'man isn\'t a command of nif-assets: man pages were jess\'s own, and this command generates none; nif-assets --help and nif-assets <command> --help describe it',
+  },
+  { argv = { 'check' }, message = 'check' .. NoInput },
+  { argv = { 'check', '--verbose' }, message = 'check' .. NoInput },
+  { argv = { 'info', '--data', 'mod' }, message = 'info' .. NoInput },
+  { argv = { 'fix', '--dry-run' }, message = 'fix' .. NoInput },
+  {
+    argv = { 'dump', '--list' },
+    message = 'dump requires a NIF or KF file, or its VFS path in a --data folder or archive',
+  },
+  { argv = { 'dump', 'a.nif', 'b.nif' }, message = 'dump takes one NIF or KF file, not \'b.nif\' as well' },
+  { argv = { 'check', '--bogus', 'a.nif' }, message = 'unknown option \'--bogus\'' },
+  { argv = { 'check', '--bogus=1', 'a.nif' }, message = 'unknown option \'--bogus=1\'' },
+  { argv = { 'check', '--Verbose', 'a.nif' }, message = 'unknown option \'--Verbose\'' },
+  { argv = { 'check', '-x', 'a.nif' }, message = 'unknown option \'-x\'' },
+  { argv = { 'check', '-vx', 'a.nif' }, message = 'unknown option \'-vx\'' },
+  -- A flag is its own command's: `--no-tree` is info's, `--list` dump's, `--dry-run` fix's.
+  { argv = { 'check', '--no-tree', 'a.nif' }, message = 'unknown option \'--no-tree\'' },
+  { argv = { 'info', '--show', 'info', 'a.nif' }, message = 'unknown option \'--show\'' },
+  { argv = { 'info', '-v', 'a.nif' }, message = 'unknown option \'-v\'' },
+  { argv = { 'check', '--dry-run', 'a.nif' }, message = 'unknown option \'--dry-run\'' },
+  { argv = { 'fix', '--list', 'a.nif' }, message = 'unknown option \'--list\'' },
+  { argv = { 'fix', '-t', 'NiNode', 'a.nif' }, message = 'unknown option \'-t\'' },
+  { argv = { 'dump', '--output', 'out', 'a.nif' }, message = 'unknown option \'--output\'' },
+  { argv = { 'check', 'a.nif', '--show' }, message = '--show requires a severity' },
+  { argv = { 'check', '--show=', 'a.nif' }, message = '--show requires a severity' },
+  { argv = { 'check', '--show', '--verbose', 'a.nif' }, message = '--show requires a severity' },
+  { argv = { 'check', 'a.nif', '--data' }, message = '--data requires a data folder or archive' },
+  { argv = { 'check', '--data', '--verbose', 'a.nif' }, message = '--data requires a data folder or archive' },
+  { argv = { 'dump', 'a.nif', '--type' }, message = '--type requires a record type' },
+  { argv = { 'dump', 'a.nif', '-t' }, message = '-t requires a record type' },
+  { argv = { 'dump', 'a.nif', '--index' }, message = '--index requires a record index' },
+  { argv = { 'dump', 'a.nif', '--name' }, message = '--name requires a regex' },
+  { argv = { 'fix', 'a.nif', '--only' }, message = '--only requires a fix' },
+  { argv = { 'fix', 'a.nif', '--output' }, message = '--output requires a folder' },
+  { argv = { 'check', 'a.nif', '--format' }, message = '--format requires a format' },
+  { argv = { '--format' }, message = '--format requires a format' },
+  { argv = { 'check', '--verbose=true', 'a.nif' }, message = '--verbose takes no value, not \'true\'' },
+  { argv = { 'info', '--no-tree=1', 'a.nif' }, message = '--no-tree takes no value, not \'1\'' },
+  { argv = { 'check', '--help=me' }, message = '--help takes no value, not \'me\'' },
+  {
+    argv = { 'check', '--show', 'fatal', 'a.nif' },
+    message = '--show takes wont-load, broken, missing-asset, collision, performance, or info, not \'fatal\'',
+  },
+  {
+    argv = { 'check', '--show', 'wontLoad', 'a.nif' },
+    message = '--show takes wont-load, broken, missing-asset, collision, performance, or info, not \'wontLoad\'',
+  },
+  {
+    argv = { 'fix', '--only', 'ncc,collision', 'a.nif' },
+    message = '--only takes rcn, ncc, markers, skin-weights, or unreachable, not \'collision\'',
+  },
+  {
+    argv = { 'fix', '--only', 'skinWeights', 'a.nif' },
+    message = '--only takes rcn, ncc, markers, skin-weights, or unreachable, not \'skinWeights\'',
+  },
+  {
+    argv = { 'fix', '--only', 'ncc,', 'a.nif' },
+    message = '--only takes rcn, ncc, markers, skin-weights, or unreachable, not \'\'',
+  },
+  {
+    argv = { 'dump', '--index', 'two', 'a.nif' },
+    message = '--index takes a record index, a whole number from 0, not \'two\'',
+  },
+  {
+    argv = { 'dump', '--index=-1', 'a.nif' },
+    message = '--index takes a record index, a whole number from 0, not \'-1\'',
+  },
+  {
+    argv = { 'dump', '--index', '1.5', 'a.nif' },
+    message = '--index takes a record index, a whole number from 0, not \'1.5\'',
+  },
+  {
+    argv = { 'check', '--format', 'xml', 'a.nif' },
+    message = '--format takes yaml, json, or toml, not \'xml\'',
+  },
+  { argv = { '--format', 'xml', 'check', 'a.nif' }, message = '--format takes yaml, json, or toml, not \'xml\'' },
+  { argv = { '--format', 'check', 'a.nif' }, message = '--format takes yaml, json, or toml, not \'check\'' },
+  -- What `jess nif` took once, it takes once.
+  { argv = { 'check', '--show', 'info', '--show', 'broken', 'a.nif' }, message = '--show was given more than once' },
+  { argv = { 'check', '-v', '--verbose', 'a.nif' }, message = '--verbose was given more than once' },
+  { argv = { 'check', '-vv', 'a.nif' }, message = '-v was given more than once' },
+  { argv = { 'dump', '--name', 'a', '--name', 'b', 'a.nif' }, message = '--name was given more than once' },
+  { argv = { 'fix', '--output', 'a', '--output=b', 'a.nif' }, message = '--output was given more than once' },
+  {
+    argv = { '--format', 'json', 'check', '--format', 'yaml', 'a.nif' },
+    message = '--format was given more than once',
+  },
+  { argv = { 'help', 'lint' }, message = 'unknown command \'lint\'' },
+  { argv = { 'help', 'check', 'info' }, message = 'help takes one command, not \'info\' as well' },
+}
+
+suite.describe('parse', function()
+  suite.it('reads check\'s flags onto its request', function()
+    expect(parsed { 'check', 'mod' }).toEqual {
+      action = 'check',
+      format = 'yaml',
+      request = { inputs = { 'mod' } },
+    }
+
+    expect(parsed { 'check', '--show', 'wont-load', 'a.nif', 'Pack.bsa' }).toEqual {
+      action = 'check',
+      format = 'yaml',
+      request = { inputs = { 'a.nif', 'Pack.bsa' }, show = 'wontLoad' },
+    }
+
+    expect(parsed { 'check', '--show=missing-asset', 'mod' }).toEqual {
+      action = 'check',
+      format = 'yaml',
+      request = { inputs = { 'mod' }, show = 'missingAsset' },
+    }
+
+    for flag, level in
+      { broken = 'broken', collision = 'collision', performance = 'performance', info = 'info' }
+    do
+      expect(parsed { 'check', '--show', flag, 'mod' }).toEqual {
+        action = 'check',
+        format = 'yaml',
+        request = { inputs = { 'mod' }, show = level },
+      }
+    end
+
+    expect(parsed { 'check', 'mod', '--data', 'first', '--data=second', '--data', 'first' }).toEqual {
+      action = 'check',
+      format = 'yaml',
+      request = { inputs = { 'mod' }, data = { 'first', 'second', 'first' } },
+    }
+  end)
+
+  suite.it('reads --verbose as every file and every finding, whatever --show says', function()
+    local verbose = {
+      action = 'check',
+      format = 'yaml',
+      request = { inputs = { 'mod' }, show = 'info', everyFile = true },
+    }
+
+    expect(parsed { 'check', '--verbose', 'mod' }).toEqual(verbose)
+    expect(parsed { 'check', '-v', 'mod' }).toEqual(verbose)
+    expect(parsed { 'check', '--show', 'wont-load', '--verbose', 'mod' }).toEqual(verbose)
+    expect(parsed { 'check', 'mod', '-v', '--show', 'wont-load' }).toEqual(verbose)
+  end)
+
+  suite.it('reads info\'s flags onto its request', function()
+    expect(parsed { 'info', 'a.nif', 'b.kf' }).toEqual {
+      action = 'info',
+      format = 'yaml',
+      request = { inputs = { 'a.nif', 'b.kf' } },
+    }
+
+    expect(parsed { 'info', '--no-tree', '--data', 'Morrowind.bsa', 'meshes/a.nif' }).toEqual {
+      action = 'info',
+      format = 'yaml',
+      request = { inputs = { 'meshes/a.nif' }, data = { 'Morrowind.bsa' }, tree = false },
+    }
+  end)
+
+  suite.it('reads dump\'s flags onto its request', function()
+    expect(parsed { 'dump', 'a.nif' }).toEqual {
+      action = 'dump',
+      format = 'yaml',
+      request = { input = 'a.nif' },
+    }
+
+    expect(parsed {
+      'dump',
+      '--type',
+      'NiTriShape',
+      '-t',
+      'ninode',
+      '-tNiCamera',
+      '-t=NiLight',
+      '--type=NiSourceTexture',
+      '--index',
+      '3',
+      '--index=0',
+      '--name',
+      '^tri ',
+      '--list',
+      '--data',
+      'Morrowind.bsa',
+      'meshes/a.nif',
+    }).toEqual {
+      action = 'dump',
+      format = 'yaml',
+      request = {
+        input = 'meshes/a.nif',
+        data = { 'Morrowind.bsa' },
+        types = { 'NiTriShape', 'ninode', 'NiCamera', 'NiLight', 'NiSourceTexture' },
+        indices = { 3, 0 },
+        name = '^tri ',
+        list = true,
+      },
+    }
+  end)
+
+  suite.it('reads fix\'s flags onto its request', function()
+    expect(parsed { 'fix', 'mod' }).toEqual {
+      action = 'fix',
+      format = 'yaml',
+      request = { inputs = { 'mod' } },
+    }
+
+    expect(parsed { 'fix', '--only', 'ncc', '--dry-run', 'mod' }).toEqual {
+      action = 'fix',
+      format = 'yaml',
+      request = { inputs = { 'mod' }, only = { 'ncc' }, dryRun = true },
+    }
+
+    -- Fixes are a list: names with commas between, and each use adding to the last.
+    expect(parsed { 'fix', '--only', 'ncc,markers', '--only=skin-weights', '--only', 'rcn,unreachable', 'mod' }).toEqual {
+      action = 'fix',
+      format = 'yaml',
+      request = {
+        inputs = { 'mod' },
+        only = { 'ncc', 'markers', 'skinWeights', 'rcn', 'unreachable' },
+      },
+    }
+
+    expect(parsed { 'fix', '--no-backup', '--output', 'Mods/NIF Fixes', '--data', 'Data Files', 'Pack.bsa' }).toEqual {
+      action = 'fix',
+      format = 'yaml',
+      request = {
+        inputs = { 'Pack.bsa' },
+        data = { 'Data Files' },
+        backup = false,
+        output = 'Mods/NIF Fixes',
+      },
+    }
+  end)
+
+  suite.it('reads --format before the command or after it', function()
+    for _, format in { 'yaml', 'json', 'toml' } do
+      local expected = { action = 'info', format = format, request = { inputs = { 'a.nif' } } }
+      expect(parsed { '--format', format, 'info', 'a.nif' }).toEqual(expected)
+      expect(parsed { `--format={format}`, 'info', 'a.nif' }).toEqual(expected)
+      expect(parsed { 'info', '--format', format, 'a.nif' }).toEqual(expected)
+      expect(parsed { 'info', 'a.nif', `--format={format}` }).toEqual(expected)
+    end
+  end)
+
+  suite.it('takes what follows -- as inputs, and a lone dash as one', function()
+    expect(parsed { 'check', '--', '--verbose', '-v' }).toEqual {
+      action = 'check',
+      format = 'yaml',
+      request = { inputs = { '--verbose', '-v' } },
+    }
+
+    expect(parsed { 'info', '-', '--data', '-' }).toEqual {
+      action = 'info',
+      format = 'yaml',
+      request = { inputs = { '-' }, data = { '-' } },
+    }
+
+    -- A value that starts with a dash has to be attached.
+    expect(parsed { 'dump', '--name=-suffix$', 'a.nif' }).toEqual {
+      action = 'dump',
+      format = 'yaml',
+      request = { input = 'a.nif', name = '-suffix$' },
+    }
+  end)
+
+  suite.it('reads help for the whole command and for each of its commands', function()
+    expect(parsed { '--help' }).toEqual { action = 'help' }
+    expect(parsed { '-h' }).toEqual { action = 'help' }
+    expect(parsed { 'help' }).toEqual { action = 'help' }
+    expect(parsed { '--format', 'json', '--help' }).toEqual { action = 'help' }
+    expect(parsed { '--help', 'check', '--bogus' }).toEqual { action = 'help' }
+
+    for _, name in { 'check', 'info', 'dump', 'fix', 'modify' } do
+      expect(parsed { name, '--help' }).toEqual { action = 'help', topic = name }
+      expect(parsed { name, '-h' }).toEqual { action = 'help', topic = name }
+      expect(parsed { 'help', name }).toEqual { action = 'help', topic = name }
+    end
+
+    -- Wherever it is among a command's options, and without the inputs the command needs.
+    expect(parsed { 'check', 'a.nif', '--show', 'info', '--help' }).toEqual { action = 'help', topic = 'check' }
+    expect(parsed { 'fix', '--only', 'ncc', '-h' }).toEqual { action = 'help', topic = 'fix' }
+  end)
+
+  suite.it('refuses what it can\'t read, saying what', function()
+    for _, case in Refused do
+      local command, message = cli.parse(case.argv)
+      expect(command).toBeNil()
+      expect(message).toBe(case.message)
+    end
+  end)
+
+  suite.it('touches no file: an input that isn\'t there parses', function()
+    expect(parsed { 'fix', '/nowhere/at/all.nif', '--data', '/nor/here' }).toEqual {
+      action = 'fix',
+      format = 'yaml',
+      request = { inputs = { '/nowhere/at/all.nif' }, data = { '/nor/here' } },
+    }
+  end)
+end)
+
+suite.describe('render', function()
+  suite.it('writes a check as jess nif check printed it, in each format', function()
+    expect(cli.render(results.checked)).toBe(golden 'check.yaml')
+    expect(cli.render(results.checked, {})).toBe(golden 'check.yaml')
+    expect(cli.render(results.checked, { format = 'yaml' })).toBe(golden 'check.yaml')
+    expect(cli.render(results.checked, { format = 'json' })).toBe(golden 'check.json')
+    expect(cli.render(results.checked, { format = 'toml' })).toBe(golden 'check.toml')
+  end)
+
+  suite.it('spells codes and field names in snake_case, and an absent value as null', function()
+    local text = cli.render(results.checked)
+    expect(string.find(text, '\n  wont_load: 1\n', 1, true) ~= nil).toBe(true)
+    expect(string.find(text, '\n  worst: missing_asset\n', 1, true) ~= nil).toBe(true)
+    expect(string.find(text, '\n    code: no_root_nodes\n', 1, true) ~= nil).toBe(true)
+    expect(string.find(text, '\n    record: null\n', 1, true) ~= nil).toBe(true)
+    expect(string.find(text, '\n  stats: null\n', 1, true) ~= nil).toBe(true)
+    expect(string.find(text, 'wontLoad', 1, true)).toBeNil()
+
+    -- JSON is one line and its line break; TOML has no null, so the field is left out.
+    local line = cli.render(results.checked, { format = 'json' })
+    expect(string.sub(line, 1, 30)).toBe '{"summary":{"textures_checked"'
+    expect(select(2, string.gsub(line, '\n', ''))).toBe(1)
+    expect(string.sub(line, -2)).toBe '}\n'
+    local document = cli.render(results.checked, { format = 'toml' })
+    expect(select(2, string.gsub(document, 'stats', ''))).toBe(1)
+    expect(string.find(document, 'null', 1, true)).toBeNil()
+  end)
+
+  suite.it('writes an info with its scene graph, leaving out what a node doesn\'t have', function()
+    expect(cli.render(results.described)).toBe(golden 'info.yaml')
+    expect(cli.render(results.described, { format = 'json' })).toBe(golden 'info.json')
+
+    -- Record types are data, not codes: they keep their spelling.
+    expect(string.find(golden 'info.yaml', '\n    NiTriShapeData: 1\n', 1, true) ~= nil).toBe(true)
+    expect(string.find(golden 'info.yaml', '\n    source: root_collision_node\n', 1, true) ~= nil).toBe(true)
+  end)
+
+  suite.it('writes a fix with each file\'s fixes, where it went, and why it didn\'t', function()
+    expect(cli.render(results.fixed)).toBe(golden 'fix.yaml')
+    expect(cli.render(results.fixed, { format = 'toml' })).toBe(golden 'fix.toml')
+  end)
+
+  suite.it('writes a modify result, with dry_run only on a dry run', function()
+    expect(cli.render(results.modified)).toBe(golden 'modify.yaml')
+
+    local dry = table.clone(results.modified)
+    dry.dryRun, dry.written, dry.script = true, nil, nil
+    expect(cli.render(dry, { format = 'json' })).toBe(golden 'modify-dry.json')
+  end)
+
+  suite.it('writes a dump: its header, then each record with index, type, and name first', function()
+    expect(cli.render(results.dumped)).toBe(golden 'dump.yaml')
+    expect(cli.render(results.dumped, { format = 'json' })).toBe(golden 'dump.json')
+
+    local rooted = table.clone(results.dumped)
+    rooted.roots = { 2 }
+    expect(cli.render(rooted, { format = 'toml' })).toBe(golden 'dump.toml')
+
+    local empty = table.clone(results.dumped)
+    empty.roots, empty.records = {}, {}
+    expect(cli.render(empty)).toBe(golden 'dump-empty.yaml')
+    expect(cli.render(empty, { format = 'json' })).toBe(golden 'dump-empty.json')
+  end)
+
+  suite.it('writes a dump\'s YAML as jess\'s own list writer did', function()
+    local function record(fields: { [string]: unknown }): string
+      local result: commands.DumpResult = {
+        command = 'dump',
+        path = 'a.nif',
+        source = 'a.nif',
+        roots = {},
+        records = { fields },
+      }
+
+      return (string.gsub(cli.render(result), '^path: a.nif\nsource: a.nif\nroots: %[%]\nrecords:\n', ''))
+    end
+
+    -- Scalar lists are inline while they are numbers or fit in a hundred columns.
+    expect(record { grid = { -2, -9 } }).toBe '- grid: [-2, -9]\n'
+    expect(record { words = { 'ab', 'cd' } }).toBe '- words: [ab, cd]\n'
+    expect(record { words = { string.rep('long', 20), string.rep('word', 5) } }).toBe(
+      `- words:\n  - {string.rep('long', 20)}\n  - {string.rep('word', 5)}\n`
+    )
+
+    -- Text with a line break is a literal block, CRLF read as LF.
+    expect(record { text = 'begin test\r\nend' }).toBe '- text: |-\n    begin test\n    end\n'
+    expect(record { text = 'one\n\ntwo\n' }).toBe '- text: |\n    one\n\n    two\n'
+    expect(record { text = ' led\n\n' }).toBe '- text: |2+\n     led\n\n'
+
+    -- A string is quoted only when it could be read as something else.
+    expect(record { text = 'Bitter Coast Region' }).toBe '- text: Bitter Coast Region\n'
+    expect(record { text = 'editormarker.nif' }).toBe '- text: editormarker.nif\n'
+    expect(record { text = '123' }).toBe '- text: \'123\'\n'
+    expect(record { text = 'yes' }).toBe '- text: \'yes\'\n'
+    expect(record { text = '=' }).toBe '- text: \'=\'\n'
+    expect(record { text = 'a: b' }).toBe '- text: \'a: b\'\n'
+    expect(record { text = 'regenerate [ability]' }).toBe '- text: \'regenerate [ability]\'\n'
+    expect(record { text = 'Seyda Neen, Fargoth\'s House' }).toBe '- text: \'Seyda Neen, Fargoth\'\'s House\'\n'
+    expect(record { text = '' }).toBe '- text: \'\'\n'
+
+    -- A float is the shortest spelling that reads back as the value a NIF stores.
+    expect(record { value = 0.25 }).toBe '- value: 0.25\n'
+    expect(record { value = 0.10000000149011612 }).toBe '- value: 0.1\n'
+    expect(record { value = 0.1 }).toBe '- value: 0.1\n'
+    expect(record { value = -11958.173828125 }).toBe '- value: -11958.174\n'
+    expect(record { value = -0.0001 }).toBe '- value: -0.0001\n'
+    expect(record { value = 3.4028234663852886e38 }).toBe '- value: 3.4028235e38\n'
+    expect(record { value = 0.5e-5 }).toBe '- value: 5.0e-6\n'
+    expect(record { value = math.huge }).toBe '- value: .inf\n'
+    expect(record { value = -math.huge }).toBe '- value: -.inf\n'
+
+    -- Field names are snake_case and in name order after the three a record starts with.
+    expect(record { type = 'NiNode', zebra = 1, index = 4, geometryData = 2, name = 'Root', alphaFormat = 'Default' }).toBe '- index: 4\n  type: NiNode\n  name: Root\n  alpha_format: Default\n  geometry_data: 2\n  zebra: 1\n'
+
+    -- Nested lists and tables keep their own indentation, and empty ones stay on the line.
+    expect(record { maps = { { slot = 'base', texture = 3 }, { slot = 'glow', texture = 5 } }, none = {} }).toBe '- maps:\n  - slot: base\n    texture: 3\n  - slot: glow\n    texture: 5\n  none: []\n'
+    expect(record { sets = { { { 0, 1 }, { 2, 3 } } } }).toBe '- sets:\n  -\n    - [0, 1]\n    - [2, 3]\n'
+  end)
+end)
+
+suite.describe('status', function()
+  local function checkedWith(wontLoad: number): commands.CheckResult
+    local summary = table.clone(results.checked.report.summary)
+    summary.wontLoad = wontLoad
+    return { command = 'check', report = { summary = summary, files = {} } }
+  end
+
+  local function fixedWith(skipped: number): commands.FixResult
+    local summary = table.clone(results.fixed.report.summary)
+    summary.skipped = skipped
+    return { command = 'fix', dryRun = false, report = { summary = summary, files = {} } }
+  end
+
+  suite.it('is 1 when a checked file won\'t load, whatever else was found', function()
+    expect(cli.status(checkedWith(0))).toBe(0)
+    expect(cli.status(checkedWith(1))).toBe(1)
+    expect(cli.status(checkedWith(7))).toBe(1)
+    expect(cli.complaint(checkedWith(0))).toBeNil()
+    expect(cli.complaint(checkedWith(1))).toBe '1 file won\'t load'
+    expect(cli.complaint(checkedWith(2))).toBe '2 files won\'t load'
+
+    -- Findings that load are a check that ran.
+    expect(results.checked.report.summary.byCode.lowercaseNcc).toBe(1)
+    expect(cli.status(results.checked)).toBe(1)
+  end)
+
+  suite.it('is 1 when a file needing fixes wasn\'t fixed', function()
+    expect(cli.status(fixedWith(0))).toBe(0)
+    expect(cli.status(fixedWith(1))).toBe(1)
+    expect(cli.complaint(fixedWith(0))).toBeNil()
+    expect(cli.complaint(fixedWith(1))).toBe '1 file needing fixes wasn\'t fixed'
+    expect(cli.complaint(fixedWith(3))).toBe '3 files needing fixes weren\'t fixed'
+  end)
+
+  suite.it('is 0 for an info, a dump, and a modify, whatever they hold', function()
+    for _, result in { results.described, results.dumped, results.modified } :: { commands.Result } do
+      expect(cli.status(result)).toBe(0)
+      expect(cli.complaint(result)).toBeNil()
+    end
+  end)
+
+  suite.it('names the statuses a run ends with', function()
+    expect(cli.Exit).toEqual { ok = 0, found = 1, invalidInput = 8, runtime = 9 }
+  end)
+end)
+
+suite.describe('run', function()
+  suite.it('is 8 for a command line it can\'t use, before any file is touched', function()
+    for _, case in Refused do
+      expect(cli.run(case.argv)).toBe(8)
+    end
+  end)
+
+  suite.it('is 0 for help, of the whole command and of each of its commands', function()
+    expect(cli.run { '--help' }).toBe(0)
+    for _, name in { 'check', 'info', 'dump', 'fix', 'modify' } do
+      expect(cli.run { name, '--help' }).toBe(0)
+    end
+  end)
+
+  suite.it('checks a data folder: 1 when a model won\'t load, 0 when all of them do', function()
+    local root = support.dataFolder(Suite, 'check')
+    expect(cli.run { '--format', 'json', 'check', root }).toBe(1)
+    expect(cli.run { 'check', '--format', 'json', '--show', 'wont-load', jess.fs.join(root, 'meshes/rock.nif') }).toBe(
+      0
+    )
+
+    -- A finding that loads isn't a failure, and neither is asking for every file.
+    jess.fs.write(jess.fs.join(root, 'meshes/rug.nif'), support.rug())
+    expect(cli.run { 'check', '--format', 'json', '-v', jess.fs.join(root, 'meshes/rug.nif') }).toBe(0)
+  end)
+
+  suite.it('describes and dumps, in each format', function()
+    local root = support.dataFolder(Suite, 'info')
+    local rock = jess.fs.join(root, 'meshes/rock.nif')
+    expect(cli.run { '--format', 'json', 'info', rock }).toBe(0)
+    expect(cli.run { 'info', '--no-tree', '--format', 'toml', rock }).toBe(0)
+    expect(cli.run { 'info', '--no-tree', '--data', root, 'meshes/rock.nif' }).toBe(0)
+    expect(cli.run { 'dump', '--list', rock }).toBe(0)
+    expect(cli.run { 'dump', '--format', 'json', '-t', 'ninode', '--index', '2', '--name', 'rock', rock }).toBe(0)
+    expect(cli.run { 'dump', '--format', 'toml', '--type', 'NiNode', rock }).toBe(0)
+  end)
+
+  suite.it('fixes one loose file in place after a backup, and into a folder', function()
+    local root = support.dataFolder(Suite, 'fix')
+    local rug = jess.fs.join(root, 'meshes/rug.nif')
+    jess.fs.write(rug, support.rug())
+    local original = jess.fs.read(rug)
+
+    expect(cli.run { '--format', 'json', 'fix', '--only', 'ncc', '--dry-run', rug }).toBe(0)
+    expect(jess.fs.read(rug)).toBe(original)
+    expect(jess.fs.exists(rug .. '.bak')).toBe(false)
+
+    local folder = jess.fs.join(root, 'fixed')
+    local fixed = jess.fs.join(folder, 'meshes/rug.nif')
+    expect(cli.run { '--format', 'json', 'fix', '--only', 'ncc', '--output', folder, rug }).toBe(0)
+    expect(jess.fs.read(rug)).toBe(original)
+    expect((nif.open(assert(jess.fs.readBuffer(fixed))):record(0) :: { [string]: unknown }).value).toBe 'NCC'
+
+    -- Into the folder again backs up the earlier fix there, unless --no-backup.
+    expect(cli.run { '--format', 'json', 'fix', '--output', folder, rug }).toBe(0)
+    expect(jess.fs.exists(fixed .. '.bak')).toBe(true)
+    expect(cli.run { '--format', 'json', 'fix', '--no-backup', '--output', folder, rug }).toBe(0)
+    expect(jess.fs.exists(fixed .. '.bak1')).toBe(false)
+
+    expect(cli.run { '--format', 'json', 'fix', rug }).toBe(0)
+    expect(jess.fs.read(rug .. '.bak')).toBe(original)
+    expect(jess.fs.read(rug)).toBe(jess.fs.read(fixed))
+
+    -- Nothing is left to fix, so nothing more is backed up.
+    expect(cli.run { '--format', 'json', 'fix', rug }).toBe(0)
+    expect(jess.fs.exists(rug .. '.bak1')).toBe(false)
+  end)
+
+  suite.it('is 9 when the run fails: an input or a data folder that isn\'t there', function()
+    local root = support.dataFolder(Suite, 'failures')
+    local rock = jess.fs.join(root, 'meshes/rock.nif')
+    local missing = jess.fs.join(root, 'missing')
+    expect(cli.run { 'check', jess.fs.join(root, 'meshes/missing.nif') }).toBe(9)
+    expect(cli.run { 'fix', '--dry-run', '--data', missing, rock }).toBe(9)
+    expect(cli.run { 'info', 'meshes/rock.nif' }).toBe(9)
+
+    -- A folder with no model in it, a dump of two files, and a regex that doesn't compile.
+    jess.fs.createDir(jess.fs.join(root, 'empty'))
+    expect(cli.run { 'check', jess.fs.join(root, 'empty') }).toBe(9)
+    expect(cli.run { 'dump', root }).toBe(9)
+    expect(cli.run { 'dump', '--name', '(', rock }).toBe(9)
+  end)
+end)
+
+return suite

@@ -1,0 +1,44 @@
+[summary]
+files = 3
+fixed = 1
+written = 1
+skipped = 1
+
+[summary.by_fix]
+ncc = 2
+skin_weights = 1
+
+[[files]]
+path = "meshes/rug.nif"
+source = "mod"
+
+[[files.fixes]]
+fix = "ncc"
+message = '"ncc" is now "NCC", so the camera still collides'
+record = 14
+
+[[files.fixes]]
+fix = "skin_weights"
+message = "dropped 2 skin weights"
+
+[files.written]
+path = "mod/meshes/rug.nif"
+backup = "mod/meshes/rug.nif.bak"
+
+[[files]]
+path = "meshes/packed.nif"
+source = "Pack.bsa"
+skipped = "it's in an archive; use --output to write fixed files to a folder"
+
+[[files.fixes]]
+fix = "ncc"
+message = '"ncc" is now "NCC", so the camera still collides'
+record = 0
+
+[[files]]
+path = "meshes/new.nif"
+source = "mod"
+fixes = []
+
+[files.written]
+path = "out/meshes/new.nif"

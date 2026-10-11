@@ -1,0 +1,103 @@
+files:
+- path: meshes/rock.nif
+  source: /mods/rock
+  version: 4.0.0.2
+  game: Morrowind
+  user_version: 0
+  beth_version: null
+  author: null
+  record_count: 5
+  record_types:
+    NiNode: 2
+    NiStringExtraData: 1
+    NiTriShape: 1
+    NiTriShapeData: 1
+  error: null
+  collision:
+    source: root_collision_node
+    node: 4
+    hides_markers: false
+  stats:
+    records: 1
+    reachable_records: 1
+    nodes: 0
+    shapes: 0
+    vertices: 0
+    triangles: 0
+    collision_triangles: 0
+    controllers: 0
+    embedded_textures: 0
+    embedded_texture_bytes: 0
+    skinned: false
+  textures:
+  - path: tx_rock.tga
+    resolved: textures/tx_rock.dds
+    source: /mods/rock
+  tree:
+  - index: 0
+    type: NiNode
+    name: Rock
+    controllers:
+    - index: 7
+      type: NiKeyframeController
+      active: true
+    effects:
+    - index: 9
+      type: NiTextureEffect
+    extra_data:
+    - index: 1
+      type: NiStringExtraData
+      value: NCC
+    - index: 8
+      type: NiExtraData
+    children:
+    - index: 2
+      type: NiTriShape
+      name: Tri Rock
+      properties:
+      - index: 5
+        type: NiTexturingProperty
+      shape:
+        data:
+          index: 3
+          type: NiTriShapeData
+        vertices: 3
+        triangles: 1
+        skin: 6
+    - index: 4
+      type: RootCollisionNode
+      name: ''
+      hidden: true
+    - index: 10
+      type: NiTriShape
+      name: Bare
+      shape:
+        data: null
+        vertices: 0
+        triangles: 0
+        skin: null
+- path: meshes/skyrim.nif
+  source: /mods/rock
+  version: 20.2.0.7
+  game: Skyrim
+  user_version: 12
+  beth_version: 83
+  author: author
+  record_count: 1
+  record_types:
+    XiNode: 1
+  error: Unknown record type XiNode
+  collision:
+    source: none
+    node: null
+    hides_markers: true
+    bsx_flags: 34
+  stats: null
+  textures: []
+  tree:
+  - index: 0
+    type: NiNode
+    name: Scene Root
+    collision:
+      index: 1
+      type: bhkCollisionObject

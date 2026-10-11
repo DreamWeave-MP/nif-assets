@@ -1,0 +1,263 @@
+--!strict
+--!native
+-- SPDX-License-Identifier: MIT OR Apache-2.0
+
+--[[
+The YAML `jess nif dump` wrote its records in, one list item at a time: jess's own writer, not
+serde_yaml's. A list of scalars is written inline when it is all numbers or fits in a hundred
+columns, text with a line break in it is a literal block, a string is quoted only when it could
+be read as something else, and a float is spelled the shortest way that reads back as the same
+value. Values are `@vfs/serialize`'s: its arrays, its ordered maps, its absent option.
+]]
+
+local serialize = require '@vfs/serialize'
+
+type Value = serialize.Value
+
+--- A list of scalars wider than this, counting the separators, is written one to a line.
+local MaxInlineWidth = 100
+
+--- Words a YAML reader may take for something other than a string when they aren't quoted.
+local Reserved: { [string]: boolean } = table.freeze {
+  ['true'] = true,
+  ['false'] = true,
+  null = true,
+  yes = true,
+  no = true,
+  on = true,
+  off = true,
+  ['y'] = true,
+  ['n'] = true,
+  nan = true,
+  inf = true,
+  ['~'] = true,
+  ['='] = true,
+  ['<<'] = true,
+}
+
+local Scratch = buffer.create(4)
+
+--- `value` as the nearest 32-bit float.
+local function narrowed(value: number): number
+  buffer.writef32(Scratch, 0, value)
+  return buffer.readf32(Scratch, 0)
+end
+
+--- The fewest decimal digits that read back as `value` (as a 32-bit float when `single`), and
+--- the decimal exponent of the first of them.
+local function shortestDigits(value: number, single: boolean): (string, number)
+  for precision = 1, 17 do
+    local text = string.format(`%.{precision - 1}e`, value)
+    local back = tonumber(text) :: number
+    if (if single then narrowed(back) else back) ~= value then continue end
+
+    local mantissa, exponent = string.match(text, '^(%d[%.%d]*)e([%+%-]%d+)$')
+    local digits = string.gsub(string.gsub(mantissa :: string, '%.', ''), '0+$', '')
+    return if digits == '' then '0' else digits, tonumber(exponent) :: number
+  end
+
+  return string.format('%.17g', value), 0
+end
+
+--- jess's `float_text` with YAML's names for what isn't a number: always a decimal point,
+--- scientific notation below 1e-4 and from 1e16 up, and a value that is exactly a 32-bit float
+--- (every float a NIF stores) spelled as that float, so a stored 0.1 reads `0.1`.
+local function floatText(value: number): string
+  if value ~= value then return '.nan' end
+
+  if value == math.huge then return '.inf' end
+
+  if value == -math.huge then return '-.inf' end
+
+  if value == 0 then return if 1 / value < 0 then '-0.0' else '0.0' end
+
+  local sign = if value < 0 then '-' else ''
+  local magnitude = math.abs(value)
+  local digits, exponent = shortestDigits(magnitude, narrowed(magnitude) == magnitude)
+  if magnitude < 1e-4 or magnitude >= 1e16 then
+    local rest = string.sub(digits, 2)
+    return `{sign}{string.sub(digits, 1, 1)}.{if rest == '' then '0' else rest}e{exponent}`
+  end
+
+  if exponent < 0 then return `{sign}0.{string.rep('0', -exponent - 1)}{digits}` end
+
+  if #digits <= exponent + 1 then
+    return `{sign}{digits}{string.rep('0', exponent + 1 - #digits)}.0`
+  end
+
+  return `{sign}{string.sub(digits, 1, exponent + 1)}.{string.sub(digits, exponent + 2)}`
+end
+
+--- Whether `text` can stand unquoted anywhere: it starts with a letter, holds only letters,
+--- digits, spaces, and `_ . - / \`, doesn't end in a space, and isn't a reserved word.
+local function isPlainSafe(text: string): boolean
+  return string.match(text, '^%a[%w _%.%-/\\]*$') ~= nil
+    and string.sub(text, -1) ~= ' '
+    and not Reserved[string.lower(text)]
+end
+
+--- A string as a YAML scalar, plain when nothing else could be read from it.
+local function quote(text: string): string
+  if isPlainSafe(text) then return text end
+
+  -- YAML 1.1 readers take these for booleans and null, though YAML 1.2 wouldn't.
+  if Reserved[string.lower(text)] then return `'{text}'` end
+
+  local quoted = string.gsub(serialize.encode(text, 'yaml'), '%s+$', '')
+  local first = string.sub(quoted, 1, 1)
+  -- A scalar serde_yaml leaves plain is plain in a block; inside an inline list, a flow
+  -- indicator in it would end the item.
+  if first ~= '\'' and first ~= '"' and string.find(text, '[,%[%]{}]') then
+    return `'{string.gsub(text, '\'', '\'\'')}'`
+  end
+
+  return quoted
+end
+
+--- A mapping key: quoted as a string is, but left bare when it reads as a number.
+local function keyText(key: string): string
+  local digits = string.match(key, '^[+-]?(%d*%.?%d*)$')
+    or string.match(key, '^[+-]?(%d*%.?%d*)[eE][+-]?%d+$')
+  if digits and string.find(digits, '%d') then return key end
+
+  return quote(key)
+end
+
+local function numberText(value: Value): string
+  if typeof(value) == 'integer' then return tostring(value) end
+
+  local number = value :: number
+  if serialize.kindOf(value) == 'int' then return string.format('%.0f', number) end
+
+  return floatText(number)
+end
+
+--- A value on one line: a scalar, or a list or mapping in flow style.
+local function inline(value: Value): string
+  local kind = serialize.kindOf(value)
+  if kind == 'null' or kind == 'none' then return 'null' end
+
+  if kind == 'boolean' then return tostring(value) end
+
+  if kind == 'int' or kind == 'float' then return numberText(value) end
+
+  if kind == 'string' then return quote(value :: string) end
+
+  if kind == 'array' then
+    local items = value :: { Value }
+    local parts = table.create(#items) :: { string }
+    for index, item in items do
+      parts[index] = inline(item)
+    end
+
+    return `[{table.concat(parts, ', ')}]`
+  end
+
+  local map = value :: serialize.Map
+  local parts = table.create(#map.keys) :: { string }
+  for index, key in map.keys do
+    parts[index] = `{keyText(key)}: {inline(map.values[key])}`
+  end
+
+  return `\{{table.concat(parts, ', ')}}`
+end
+
+local function isMultiline(value: Value): boolean
+  return type(value) == 'string' and string.find(value, '\n', 1, true) ~= nil
+end
+
+--- Whether a list goes on one line: scalars only, none with a line break, and either all
+--- numbers or narrow enough.
+local function isInlineSequence(items: { Value }): boolean
+  local numbers, width = true, 0
+  for _, item in items do
+    local kind = serialize.kindOf(item)
+    if kind == 'array' or kind == 'map' or isMultiline(item) then return false end
+
+    if kind ~= 'int' and kind ~= 'float' then numbers = false end
+
+    width += #inline(item) + 2
+  end
+
+  return numbers or width <= MaxInlineWidth
+end
+
+--- Text with a line break in it as a literal block, CRLF read as LF. Text holding a control
+--- character a block can't carry is quoted instead.
+local function writeBlockScalar(out: { string }, text: string, indent: number)
+  local normal = string.gsub(text, '\r\n', '\n')
+  if string.find(normal, '[%z\1-\8\11-\31\127]') or string.find(normal, '\194[\128-\159]') then
+    table.insert(out, `{quote(normal)}\n`)
+    return
+  end
+
+  local body = string.gsub(normal, '\n+$', '')
+  local trailing = #normal - #body
+  local chomp = if trailing == 0 then '-' elseif trailing == 1 then '' else '+'
+  local indicator = if string.sub(body, 1, 1) == ' ' then '2' else ''
+  table.insert(out, `|{indicator}{chomp}\n`)
+
+  local pad = string.rep(' ', indent)
+  for _, line in string.split(body, '\n') do
+    table.insert(out, if line == '' then '\n' else `{pad}{line}\n`)
+  end
+
+  table.insert(out, string.rep('\n', trailing - 1))
+end
+
+local writeSequenceItem: (out: { string }, value: Value, indent: number) -> ()
+
+local function writeMapping(out: { string }, map: serialize.Map, indent: number)
+  local pad = string.rep(' ', indent)
+  for _, key in map.keys do
+    local value = map.values[key]
+    local kind = serialize.kindOf(value)
+    table.insert(out, `{pad}{keyText(key)}:`)
+
+    if kind == 'map' and #(value :: serialize.Map).keys > 0 then
+      table.insert(out, '\n')
+      writeMapping(out, value :: serialize.Map, indent + 2)
+    elseif kind == 'array' and not isInlineSequence(value :: { Value }) then
+      table.insert(out, '\n')
+      for _, item in value :: { Value } do
+        writeSequenceItem(out, item, indent)
+      end
+    elseif isMultiline(value) then
+      table.insert(out, ' ')
+      writeBlockScalar(out, value :: string, indent + 2)
+    else
+      table.insert(out, ` {inline(value)}\n`)
+    end
+  end
+end
+
+function writeSequenceItem(out: { string }, value: Value, indent: number)
+  local pad = string.rep(' ', indent)
+  local kind = serialize.kindOf(value)
+
+  if kind == 'map' and #(value :: serialize.Map).keys > 0 then
+    -- The mapping's first key sits on the dash's line, where its own indentation would be.
+    local body: { string } = {}
+    writeMapping(body, value :: serialize.Map, indent + 2)
+    table.insert(out, `{pad}- {string.sub(table.concat(body), indent + 3)}`)
+  elseif kind == 'array' and not isInlineSequence(value :: { Value }) then
+    table.insert(out, `{pad}-\n`)
+    for _, item in value :: { Value } do
+      writeSequenceItem(out, item, indent + 2)
+    end
+  elseif isMultiline(value) then
+    table.insert(out, `{pad}- `)
+    writeBlockScalar(out, value :: string, indent + 2)
+  else
+    table.insert(out, `{pad}- {inline(value)}\n`)
+  end
+end
+
+--- `value` as one item of a top-level YAML list.
+local function item(value: Value): string
+  local out: { string } = {}
+  writeSequenceItem(out, value, 0)
+  return table.concat(out)
+end
+
+return table.freeze { item = item, floatText = floatText, quote = quote }

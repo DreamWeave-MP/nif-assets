@@ -1,0 +1,197 @@
+--!strict
+--!native
+-- Results written out by hand, for `render`, `status`, and `complaint` to be handed: no command
+-- made them, so what the command line prints for one is pinned apart from what a command finds.
+-- `tests/golden/` holds the document each one renders to.
+local commands = require '@nif-assets/commands'
+
+local Stats = table.freeze {
+  records = 1,
+  reachableRecords = 1,
+  nodes = 0,
+  shapes = 0,
+  vertices = 0,
+  triangles = 0,
+  collisionTriangles = 0,
+  controllers = 0,
+  embeddedTextures = 0,
+  embeddedTextureBytes = 0,
+  skinned = false,
+}
+
+local Checked: commands.CheckResult = {
+  command = 'check',
+  report = {
+    summary = {
+      texturesChecked = true,
+      loadOrderChecked = false,
+      files = 3,
+      deeplyChecked = 2,
+      wontLoad = 1,
+      byWorstSeverity = { wontLoad = 1, missingAsset = 1 },
+      byCode = { noRootNodes = 1, missingTexture = 1, lowercaseNcc = 1 },
+    },
+    files = {
+      {
+        path = 'meshes/broken.nif',
+        source = '/mods/rock',
+        version = '4.0.0.2',
+        game = 'Morrowind',
+        deeplyChecked = true,
+        worst = 'wontLoad',
+        findings = { { severity = 'wontLoad', code = 'noRootNodes', message = 'Found no root nodes' } },
+        textures = {},
+        stats = Stats,
+      },
+      {
+        path = 'meshes/rug.nif',
+        source = '/mods/rock',
+        deeplyChecked = false,
+        worst = 'missingAsset',
+        findings = {
+          {
+            severity = 'missingAsset',
+            code = 'missingTexture',
+            message = 'texture "tx_gone.tga" not found (tried textures/tx_gone.dds, textures/tx_gone.tga)',
+          },
+          {
+            severity = 'collision',
+            code = 'lowercaseNcc',
+            message = '"ncc" turns collision off entirely; only an uppercase "NCC" keeps camera collision',
+            record = 4,
+          },
+        },
+        textures = {
+          { path = 'tx_gone.tga' },
+          { path = 'Tx_There.tga', resolved = 'textures/tx_there.dds', source = '/mods/rock/textures/tx_there.dds' },
+        },
+      },
+    },
+  },
+}
+
+local Described: commands.InfoResult = {
+  command = 'info',
+  files = {
+    {
+      path = 'meshes/rock.nif',
+      source = '/mods/rock',
+      version = '4.0.0.2',
+      game = 'Morrowind',
+      userVersion = 0,
+      recordCount = 5,
+      recordTypes = { NiTriShape = 1, NiNode = 2, NiStringExtraData = 1, NiTriShapeData = 1 },
+      collision = { source = 'rootCollisionNode', node = 4, hidesMarkers = false },
+      stats = Stats,
+      textures = { { path = 'tx_rock.tga', resolved = 'textures/tx_rock.dds', source = '/mods/rock' } },
+      tree = {
+        {
+          index = 0,
+          type = 'NiNode',
+          name = 'Rock',
+          controllers = { { index = 7, type = 'NiKeyframeController', active = true } },
+          extraData = { { index = 1, type = 'NiStringExtraData', value = 'NCC' }, { index = 8, type = 'NiExtraData' } },
+          effects = { { index = 9, type = 'NiTextureEffect' } },
+          children = {
+            {
+              index = 2,
+              type = 'NiTriShape',
+              name = 'Tri Rock',
+              properties = { { index = 5, type = 'NiTexturingProperty' } },
+              shape = { data = { index = 3, type = 'NiTriShapeData' }, vertices = 3, triangles = 1, skin = 6 },
+            },
+            { index = 4, type = 'RootCollisionNode', name = '', hidden = true },
+            { index = 10, type = 'NiTriShape', name = 'Bare', shape = { vertices = 0, triangles = 0 } },
+          },
+        },
+      },
+    },
+    {
+      path = 'meshes/skyrim.nif',
+      source = '/mods/rock',
+      version = '20.2.0.7',
+      game = 'Skyrim',
+      userVersion = 12,
+      bethVersion = 83,
+      author = 'author',
+      recordCount = 1,
+      recordTypes = { XiNode = 1 },
+      error = 'Unknown record type XiNode',
+      collision = { source = 'none', hidesMarkers = true, bsxFlags = 34 },
+      textures = {},
+      tree = { { index = 0, type = 'NiNode', name = 'Scene Root', collision = { index = 1, type = 'bhkCollisionObject' } } },
+    },
+  },
+}
+
+local Fixed: commands.FixResult = {
+  command = 'fix',
+  dryRun = false,
+  report = {
+    summary = { files = 3, fixed = 1, written = 1, skipped = 1, byFix = { ncc = 2, skinWeights = 1 } },
+    files = {
+      {
+        path = 'meshes/rug.nif',
+        source = 'mod',
+        fixes = {
+          { fix = 'ncc', message = '"ncc" is now "NCC", so the camera still collides', record = 14 },
+          { fix = 'skinWeights', message = 'dropped 2 skin weights' },
+        },
+        written = { path = 'mod/meshes/rug.nif', backup = 'mod/meshes/rug.nif.bak' },
+      },
+      {
+        path = 'meshes/packed.nif',
+        source = 'Pack.bsa',
+        fixes = { { fix = 'ncc', message = '"ncc" is now "NCC", so the camera still collides', record = 0 } },
+        skipped = 'it\'s in an archive; use --output to write fixed files to a folder',
+      },
+      { path = 'meshes/new.nif', source = 'mod', fixes = {}, written = { path = 'out/meshes/new.nif' } },
+    },
+  },
+}
+
+local Modified: commands.ModifyResult = {
+  command = 'modify',
+  input = 'meshes/f/furn_de_firepit_01.nif',
+  path = 'meshes/f/furn_de_firepit_01.nif',
+  script = 'add-ncc.luau',
+  changed = true,
+  dryRun = false,
+  written = { path = 'mod/meshes/f/furn_de_firepit_01.nif' },
+}
+
+local Dumped: commands.DumpResult = {
+  command = 'dump',
+  path = 'meshes/rock.nif',
+  source = '/mods/rock/meshes/rock.nif',
+  roots = { 2, -1 },
+  records = {
+    {
+      index = 1,
+      type = 'NiTriShape',
+      name = 'Tri Rock',
+      geometryData = 0,
+      flags = 4,
+      scale = 1.5,
+      translation = { 0, 0.10000000149011612, -276.1847839355469 },
+      rotation = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } },
+      properties = {},
+      bound = { center = { 0, 0, 0 }, radius = 141.42135620117188 },
+      note = 'line one\nline two',
+      source = { external = 'Textures\\Tx_Rock.tga' },
+      keys = { { time = 0, value = 1e-7 }, { time = 0.5, value = 3.4028234663852886e38 } },
+      pixelLayout = 'Palettized4',
+      useMipmaps = 'Yes',
+      isStatic = true,
+    },
+    { index = 2, type = 'NiNode', name = '', children = { 1 }, label = 'Seyda Neen, Arrille' },
+  },
+}
+
+return table.freeze {
+  checked = Checked,
+  described = Described,
+  fixed = Fixed,
+  modified = Modified,
+  dumped = Dumped,
+}

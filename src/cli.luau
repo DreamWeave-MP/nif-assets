@@ -1,0 +1,526 @@
+--!strict
+--!native
+-- SPDX-License-Identifier: MIT OR Apache-2.0
+
+--[[
+@nif-assets/cli: the `nif-assets` command line, which is `jess nif`'s under the package's name.
+
+  parse(argv) -> (command, nil) | (nil, message)
+  render(result, options) -> the document the original printed for it
+  status(result) -> exit status
+  complaint(result) -> what standard error is told when the status is 1, or nil
+  run(argv) -> exit status
+
+  nif-assets [--format <yaml|json|toml>] <command> [options] <inputs>...
+  nif-assets check [--show <LEVEL>] [-v] [--data <PATH>]... <INPUTS>...
+  nif-assets info [--no-tree] [--data <PATH>]... <INPUTS>...
+  nif-assets dump [-t <TYPE>]... [--index <N>]... [--name <REGEX>] [--list] [--data <PATH>]... <INPUT>
+  nif-assets fix [--only <FIX>,...] [--dry-run] [--no-backup] [--output <DIR>] [--data <PATH>]... <INPUTS>...
+  nif-assets help [<command>]
+
+This is presentation and nothing else. `parse` reads an argument list into the request
+`@nif-assets/commands` takes for the command it names, touching no file; `run` hands the request
+over, writes what `render` makes of the result to standard output, and returns `status`. The
+subcommands, flags, short forms, and defaults are `jess nif`'s. A flag's value follows it or is
+attached with `=`; an argument that starts with `-` is never taken as a value unless it is
+attached; `--` ends the options.
+
+Refused by name: `modify`, which ran a Luau script on a NIF, because a package can't load a
+script it is handed when it runs (`@nif-assets/commands`' `modify` takes the edit as a function
+instead); and `completions` and `man`, which were `jess`'s own and aren't this command's.
+
+Exit statuses: 0 when the command did what it was asked, whatever it found; 1 where `jess nif`
+exited 1 (`check` found a file OpenMW won't load, `fix` left a file that needed fixing unfixed),
+after the report is printed; 8 when the command line can't be used; 9 when the run failed (an
+input that isn't there, a file that can't be read, a regex that doesn't compile). Messages go to
+standard error as `nif-assets: <message>`.
+]]
+
+local commands = require './commands'
+local Fix = require '@nif/fix'
+local process = require '@dream/process'
+local rendering = require './render'
+local usage = require './usage'
+
+export type Format = rendering.Format
+
+export type Command =
+  { action: 'help', topic: string? }
+  | { action: 'check', format: Format, request: commands.CheckRequest }
+  | { action: 'info', format: Format, request: commands.InfoRequest }
+  | { action: 'dump', format: Format, request: commands.DumpRequest }
+  | { action: 'fix', format: Format, request: commands.FixRequest }
+
+export type RenderOptions = { format: Format? }
+
+local Exit = table.freeze { ok = 0, found = 1, invalidInput = 8, runtime = 9 }
+
+--- A flag: the name its values are collected under, what it is missing when it takes a value
+--- and has none, and whether it may be given more than once.
+type Flag = { name: string, missing: string?, repeated: boolean? }
+
+local Data: Flag = { name = 'data', missing = 'a data folder or archive', repeated = true }
+local Verbose: Flag = { name = 'verbose' }
+local Types: Flag = { name = 'types', missing = 'a record type', repeated = true }
+
+--- The flags every command takes.
+local Shared: { [string]: Flag } = table.freeze {
+  ['--format'] = { name = 'format', missing = 'a format' },
+  ['--help'] = { name = 'help' },
+  ['-h'] = { name = 'help' },
+}
+
+--- Each command's own flags.
+local Flags: { [string]: { [string]: Flag } } = table.freeze {
+  check = {
+    ['--show'] = { name = 'show', missing = 'a severity' },
+    ['--verbose'] = Verbose,
+    ['-v'] = Verbose,
+    ['--data'] = Data,
+  },
+  info = {
+    ['--no-tree'] = { name = 'noTree' },
+    ['--data'] = Data,
+  },
+  dump = {
+    ['--type'] = Types,
+    ['-t'] = Types,
+    ['--index'] = { name = 'indices', missing = 'a record index', repeated = true },
+    ['--name'] = { name = 'name', missing = 'a regex' },
+    ['--list'] = { name = 'list' },
+    ['--data'] = Data,
+  },
+  fix = {
+    ['--only'] = { name = 'only', missing = 'a fix', repeated = true },
+    ['--dry-run'] = { name = 'dryRun' },
+    ['--no-backup'] = { name = 'noBackup' },
+    ['--output'] = { name = 'output', missing = 'a folder' },
+    ['--data'] = Data,
+  },
+}
+
+--- `--show`'s values, and the severity each names.
+local Levels: { [string]: commands.Level } = table.freeze {
+  ['wont-load'] = 'wontLoad' :: commands.Level,
+  broken = 'broken' :: commands.Level,
+  ['missing-asset'] = 'missingAsset' :: commands.Level,
+  collision = 'collision' :: commands.Level,
+  performance = 'performance' :: commands.Level,
+  info = 'info' :: commands.Level,
+}
+
+--- `--only`'s values, and the fix each names.
+local Fixes: { [string]: Fix.Kind } = table.freeze {
+  rcn = 'rcn' :: Fix.Kind,
+  ncc = 'ncc' :: Fix.Kind,
+  markers = 'markers' :: Fix.Kind,
+  ['skin-weights'] = 'skinWeights' :: Fix.Kind,
+  unreachable = 'unreachable' :: Fix.Kind,
+}
+
+local Formats: { [string]: Format } = table.freeze {
+  yaml = 'yaml' :: Format,
+  json = 'json' :: Format,
+  toml = 'toml' :: Format,
+}
+
+--- What a command asks for when it is given no input.
+local Inputs: { [string]: string } = table.freeze {
+  check = 'check requires at least one input: a NIF or KF file, a data folder, or an archive',
+  info = 'info requires at least one input: a NIF or KF file, a data folder, or an archive',
+  fix = 'fix requires at least one input: a NIF or KF file, a data folder, or an archive',
+  dump = 'dump requires a NIF or KF file, or its VFS path in a --data folder or archive',
+}
+
+--- The commands that aren't run, and why.
+local Refused: { [string]: string } = table.freeze {
+  modify = 'modify can\'t run: a package can\'t load a Luau script it is handed when it runs, so'
+    .. ' there is nothing to give --script to. @nif-assets/commands\' modify takes the edit as a'
+    .. ' function; a script of your own, run with jess run, requires it and passes the edit in',
+  completions = 'completions isn\'t a command of nif-assets: shell completions were jess\'s own,'
+    .. ' and this command generates none',
+  man = 'man isn\'t a command of nif-assets: man pages were jess\'s own, and this command'
+    .. ' generates none; nif-assets --help and nif-assets <command> --help describe it',
+}
+
+local function out(text: string) process.write('stdout', text) end
+
+local function err(text: string) process.write('stderr', `{text}\n`) end
+
+--- What was given: each flag's values by its name (a flag that takes none holds one empty
+--- string each time it is given), and the arguments that aren't flags.
+type Given = { flags: { [string]: { string } }, positional: { string } }
+
+--- Reads `argv` from `first` against `known`. Nil and why for an unknown flag, a flag missing
+--- its value or given one it doesn't take, or one given more often than it may be.
+local function scan(argv: { string }, first: number, known: { [string]: Flag }): (Given?, string?)
+  local given: Given = { flags = {}, positional = {} }
+  local index = first
+
+  local function record(spelling: string, flag: Flag, value: string): string?
+    local values = given.flags[flag.name] or {}
+    if #values > 0 and not flag.repeated then return `{spelling} was given more than once` end
+
+    table.insert(values, value)
+    given.flags[flag.name] = values
+    return nil
+  end
+
+  --- The value of the flag at `index`: the one attached, or the next argument, which is never
+  --- one that looks like an option.
+  local function valueOf(spelling: string, flag: Flag, attached: string?): (string?, string?)
+    local value = attached
+    if not value then
+      local following = argv[index + 1]
+      if following and (following == '-' or string.sub(following, 1, 1) ~= '-') then
+        index += 1
+        value = following
+      end
+    end
+
+    if not value or value == '' then return nil, `{spelling} requires {flag.missing}` end
+
+    return value, nil
+  end
+
+  while index <= #argv do
+    local argument = argv[index]
+
+    if argument == '--' then
+      table.move(argv, index + 1, #argv, #given.positional + 1, given.positional)
+      break
+    end
+
+    if string.sub(argument, 1, 2) == '--' then
+      local name, attached = string.match(argument, '^(%-%-[^=]+)=(.*)$')
+      local spelling: string = name or argument
+      local flag = known[spelling] or Shared[spelling]
+      if not flag then return nil, `unknown option '{argument}'` end
+
+      local value = ''
+      if flag.missing then
+        local found, problem = valueOf(spelling, flag, attached)
+        if not found then return nil, problem end
+
+        value = found
+      elseif attached then
+        return nil, `{spelling} takes no value, not '{attached}'`
+      end
+
+      local problem = record(spelling, flag, value)
+      if problem then return nil, problem end
+    elseif string.sub(argument, 1, 1) == '-' and argument ~= '-' then
+      -- Short flags may share a dash; one that takes a value takes the rest of the argument.
+      local position = 2
+      while position <= #argument do
+        local spelling = `-{string.sub(argument, position, position)}`
+        local flag = known[spelling] or Shared[spelling]
+        if not flag then return nil, `unknown option '{argument}'` end
+
+        local value = ''
+        if flag.missing then
+          local rest = string.sub(argument, position + 1)
+          if string.sub(rest, 1, 1) == '=' then rest = string.sub(rest, 2) end
+
+          local found, problem = valueOf(spelling, flag, if rest ~= '' then rest else nil)
+          if not found then return nil, problem end
+
+          value, position = found, #argument
+        end
+
+        local problem = record(spelling, flag, value)
+        if problem then return nil, problem end
+
+        position += 1
+      end
+    else
+      table.insert(given.positional, argument)
+    end
+
+    index += 1
+  end
+
+  return given, nil
+end
+
+--- The names `choices` has, in the order given, for a message.
+local function choice(names: { string }): string
+  return `{table.concat(names, ', ', 1, #names - 1)}, or {names[#names]}`
+end
+
+local function formatOf(values: { string }?): (Format?, string?)
+  if not values then return 'yaml', nil end
+
+  local format = Formats[values[1]]
+  if not format then return nil, `--format takes yaml, json, or toml, not '{values[1]}'` end
+
+  return format, nil
+end
+
+local LevelNames =
+  choice { 'wont-load', 'broken', 'missing-asset', 'collision', 'performance', 'info' }
+
+local FixNames = choice { 'rcn', 'ncc', 'markers', 'skin-weights', 'unreachable' }
+
+local function parseCheck(given: Given, format: Format): (Command?, string?)
+  local request: commands.CheckRequest = { inputs = given.positional, data = given.flags.data }
+  local show = given.flags.show
+  if show then
+    local level = Levels[show[1]]
+    if not level then return nil, `--show takes {LevelNames}, not '{show[1]}'` end
+
+    request.show = level
+  end
+
+  -- --verbose is every file and every finding, whatever --show says.
+  if given.flags.verbose then
+    request.show, request.everyFile = 'info', true
+  end
+
+  return { action = 'check' :: 'check', format = format, request = request }, nil
+end
+
+local function parseInfo(given: Given, format: Format): (Command?, string?)
+  local request: commands.InfoRequest = { inputs = given.positional, data = given.flags.data }
+  if given.flags.noTree then request.tree = false end
+
+  return { action = 'info' :: 'info', format = format, request = request }, nil
+end
+
+local function parseDump(given: Given, format: Format): (Command?, string?)
+  if #given.positional > 1 then
+    return nil, `dump takes one NIF or KF file, not '{given.positional[2]}' as well`
+  end
+
+  local request: commands.DumpRequest = {
+    input = given.positional[1],
+    data = given.flags.data,
+    types = given.flags.types,
+  }
+
+  local indices = given.flags.indices
+  if indices then
+    local list = table.create(#indices) :: { number }
+    for position, text in indices do
+      if not string.match(text, '^%d+$') then
+        return nil, `--index takes a record index, a whole number from 0, not '{text}'`
+      end
+
+      list[position] = tonumber(text) :: number
+    end
+
+    request.indices = list
+  end
+
+  local name = given.flags.name
+  if name then request.name = name[1] end
+
+  if given.flags.list then request.list = true end
+
+  return { action = 'dump' :: 'dump', format = format, request = request }, nil
+end
+
+local function parseFix(given: Given, format: Format): (Command?, string?)
+  local request: commands.FixRequest = { inputs = given.positional, data = given.flags.data }
+  local only = given.flags.only
+  if only then
+    local kinds: { Fix.Kind } = {}
+    for _, value in only do
+      for _, name in string.split(value, ',') do
+        local kind = Fixes[name]
+        if not kind then return nil, `--only takes {FixNames}, not '{name}'` end
+
+        table.insert(kinds, kind)
+      end
+    end
+
+    request.only = kinds
+  end
+
+  if given.flags.dryRun then request.dryRun = true end
+
+  if given.flags.noBackup then request.backup = false end
+
+  local output = given.flags.output
+  if output then request.output = output[1] end
+
+  return { action = 'fix' :: 'fix', format = format, request = request }, nil
+end
+
+local Parsers: { [string]: (given: Given, format: Format) -> (Command?, string?) } = table.freeze {
+  check = parseCheck,
+  info = parseInfo,
+  dump = parseDump,
+  fix = parseFix,
+}
+
+--- `help [<command>]`: the usage of the whole command, or of one of its commands.
+local function parseHelp(argv: { string }, first: number): (Command?, string?)
+  local topic = argv[first]
+  if argv[first + 1] then return nil, `help takes one command, not '{argv[first + 1]}' as well` end
+
+  if topic and not usage.commands[topic] then return nil, `unknown command '{topic}'` end
+
+  return { action = 'help' :: 'help', topic = topic }, nil
+end
+
+--- Reads an argument list into the command it names, without running it.
+local function parse(argv: { string }): (Command?, string?)
+  -- `--format` and `--help` may come before the command, as jess's global options did.
+  local leading: { string } = {}
+  local index = 1
+  while index <= #argv do
+    local argument = argv[index]
+    if argument == '--format' and argv[index + 1] then
+      table.insert(leading, argument)
+      index += 1
+      argument = argv[index]
+    elseif string.sub(argument, 1, 1) ~= '-' or argument == '-' or argument == '--' then
+      break
+    end
+
+    table.insert(leading, argument)
+    index += 1
+  end
+
+  local before, problem = scan(leading, 1, {})
+  if not before then return nil, problem end
+
+  if before.flags.help then return { action = 'help' :: 'help' }, nil end
+
+  local first = before.flags.format
+  if first then
+    local _, unknown = formatOf(first)
+    if unknown then return nil, unknown end
+  end
+
+  local action = argv[index]
+  if not action or action == '--' then return nil, 'a command is required' end
+
+  if action == 'help' then return parseHelp(argv, index + 1) end
+
+  local refusal = Refused[action]
+  local known = Flags[action]
+  if not known and not refusal then return nil, `unknown command '{action}'` end
+
+  -- A refused command still answers --help, which says why it is refused.
+  if refusal then
+    for position = index + 1, #argv do
+      if argv[position] == '--' then break end
+
+      if argv[position] == '--help' or argv[position] == '-h' then
+        if usage.commands[action] then return { action = 'help' :: 'help', topic = action }, nil end
+
+        break
+      end
+    end
+
+    return nil, refusal
+  end
+
+  local given, unreadable = scan(argv, index + 1, known)
+  if not given then return nil, unreadable end
+
+  if given.flags.help then return { action = 'help' :: 'help', topic = action }, nil end
+
+  local second = given.flags.format
+  if first and second then return nil, '--format was given more than once' end
+
+  local format, unknown = formatOf(first or second)
+  if not format then return nil, unknown end
+
+  if #given.positional == 0 then return nil, Inputs[action] end
+
+  return Parsers[action](given, format)
+end
+
+--- The exit status `jess nif` gave for a result: 1 when a checked file won't load or a file
+--- needing fixes wasn't fixed, and 0 otherwise.
+local function status(result: commands.Result): number
+  if result.command == 'check' and result.report.summary.wontLoad > 0 then return Exit.found end
+
+  if result.command == 'fix' and result.report.summary.skipped > 0 then return Exit.found end
+
+  return Exit.ok
+end
+
+--- `count` and the wording that agrees with it.
+local function counted(count: number, one: string, many: string): string
+  return `{count} {if count == 1 then one else many}`
+end
+
+--- What standard error is told after a report whose status is 1: `2 files won't load`.
+local function complaint(result: commands.Result): string?
+  if result.command == 'check' and result.report.summary.wontLoad > 0 then
+    return counted(result.report.summary.wontLoad, 'file won\'t load', 'files won\'t load')
+  end
+
+  if result.command == 'fix' and result.report.summary.skipped > 0 then
+    return counted(
+      result.report.summary.skipped,
+      'file needing fixes wasn\'t fixed',
+      'files needing fixes weren\'t fixed'
+    )
+  end
+
+  return nil
+end
+
+--- The result as the text the original printed for it, in the format asked for (YAML without
+--- one), ending with its line break.
+local function render(result: commands.Result, options: RenderOptions?): string
+  return rendering.render(result, options and options.format)
+end
+
+local function execute(command: Command): commands.Result
+  if command.action == 'check' then return commands.check(command.request) end
+
+  if command.action == 'info' then return commands.info(command.request) end
+
+  if command.action == 'dump' then return commands.dump(command.request) end
+
+  if command.action == 'fix' then return commands.fix(command.request) end
+
+  return error(`no command to run for {command.action}`, 0)
+end
+
+local function run(argv: { string }): number
+  local command, message = parse(argv)
+  if not command then
+    err(`nif-assets: {message}`)
+    return Exit.invalidInput
+  end
+
+  if command.action == 'help' then
+    out(`{if command.topic then usage.commands[command.topic] else usage.top}\n`)
+    return Exit.ok
+  end
+
+  -- A command raises for a request it can't carry out at all (an input that isn't there, a
+  -- dump of more than one file, a regex that doesn't compile), and the serializer raises for a
+  -- value TOML can't hold.
+  local done, result, text = pcall(function(): (commands.Result, string)
+    local made = execute(command)
+    return made, render(made, { format = command.format })
+  end)
+
+  if not done then
+    err(`nif-assets: {result}`)
+    return Exit.runtime
+  end
+
+  out(text)
+  local found = complaint(result)
+  if found then err(`nif-assets: {found}`) end
+
+  return status(result)
+end
+
+return table.freeze {
+  Exit = Exit,
+  parse = parse,
+  render = render,
+  status = status,
+  complaint = complaint,
+  run = run,
+}
