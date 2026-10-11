@@ -1,0 +1,23 @@
+manifest_version = 1
+
+[package]
+id = "org.dreamweave.nif-assets"
+version = "0.1.0"
+jess_api = "1"
+include = ["src"]
+
+[dependencies]
+"org.dreamweave.nif" = "0.1"
+"org.dreamweave.vfs" = "0.1"
+
+[modules]
+"@nif-assets" = "src/init.luau"
+
+# The module is inert API: it does nothing until something requires it, and runs with the
+# authority of whatever calls it. Its reports read data folders, archives, and NIFs, and `fix`
+# writes the files it repairs.
+
+[[layer]]
+id = "nif-assets.core"
+requires = ["nif.core", "vfs.core"]
+exports = ["@nif-assets"]
