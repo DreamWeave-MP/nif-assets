@@ -1143,4 +1143,154 @@ suite.describe('fix', function()
   end)
 end)
 
+suite.describe('dump', function()
+  suite.it('gives a model\'s records as plain data, links as record indices', function()
+    local root = mod 'dump'
+    local made = assets.sources(nil, nil, { jess.fs.join(root, 'mod/Meshes/x/shape.nif') })
+    local dumped = assets.dump(made, made.targets[1])
+    expect(dumped.path).toBe 'meshes/x/shape.nif'
+    expect(dumped.source).toBe(jess.fs.join(root, 'mod/Meshes/x/shape.nif'))
+    expect(dumped.roots).toEqual { 0 }
+    expect(#dumped.records).toBe(5)
+
+    -- Coordinates and bulk data are lists of numbers, and a link the record doesn't have is
+    -- a field it doesn't have.
+    expect(dumped.records[1]).toEqual {
+      index = 0,
+      type = 'NiNode',
+      name = 'Root',
+      flags = 0,
+      translation = { 0, 0, 0 },
+      rotation = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } },
+      scale = 1,
+      velocity = { 0, 0, 0 },
+      properties = {},
+      children = { 4 },
+      effects = {},
+    }
+
+    local data = dumped.records[2]
+    expect(data.type).toBe 'NiTriShapeData'
+    expect(data.vertices).toEqual { { 0, 0, 0 }, { 1, 0, 0 }, { 0, 1, 0 } }
+    expect(data.triangles).toEqual { { 0, 1, 2 } }
+    expect(data.normals).toEqual { { 0, 0, 1 }, { 0, 0, 1 }, { 0, 0, 1 } }
+    expect(data.bound).toEqual { center = { 0.5, 0.5, 0 }, radius = 0.7071067690849304 }
+
+    expect(dumped.records[3]).toEqual {
+      index = 2,
+      type = 'NiSourceTexture',
+      name = '',
+      source = { external = 'textures\\tx_a.tga' },
+      pixelLayout = 'Default',
+      useMipmaps = 'Default',
+      alphaFormat = 'Default',
+      isStatic = true,
+    }
+  end)
+
+  suite.it('picks records by type, index, and name, and lists them', function()
+    local root = mod 'dump-pick'
+    local made = assets.sources(nil, nil, { jess.fs.join(root, 'mod/Meshes/x/defects.nif') })
+    local target = made.targets[1]
+    expect(assets.dump(made, target, { list = true }).records).toEqual {
+      { index = 0, type = 'NiNode', name = 'Root' },
+      { index = 1, type = 'NiStringExtraData' },
+      { index = 2, type = 'NiNode', name = 'Inner' },
+      { index = 3, type = 'RootCollisionNode', name = 'RootCollisionNode' },
+      { index = 4, type = 'NiTriShapeData' },
+      { index = 5, type = 'NiSourceTexture' },
+      { index = 6, type = 'NiTexturingProperty' },
+      { index = 7, type = 'NiTriShape', name = 'Tri EditorMarker 0' },
+    }
+
+    expect(assets.dump(made, target, { list = true, types = { 'ninode', 'NITRISHAPE' } }).records).toEqual {
+      { index = 0, type = 'NiNode', name = 'Root' },
+      { index = 2, type = 'NiNode', name = 'Inner' },
+      { index = 7, type = 'NiTriShape', name = 'Tri EditorMarker 0' },
+    }
+
+    expect(assets.dump(made, target, { list = true, types = { 'NiNode' }, indices = { 2, 7 } }).records).toEqual {
+      { index = 2, type = 'NiNode', name = 'Inner' },
+    }
+
+    expect(assets.dump(made, target, { list = true, name = 'ROOT' }).records).toEqual {
+      { index = 0, type = 'NiNode', name = 'Root' },
+      { index = 3, type = 'RootCollisionNode', name = 'RootCollisionNode' },
+    }
+
+    expect(assets.dump(made, target, { indices = { 1 } }).records).toEqual {
+      { index = 1, type = 'NiStringExtraData', value = 'NCc', bytesRemaining = 7 },
+    }
+
+    expect(function() assets.dump(made, target, { name = '[' }) end).toThrow 'invalid name regex: '
+  end)
+
+  suite.it('reads another game\'s model as OpenMW does, and says why it won\'t read one', function()
+    local root = tree('dump-skyrim', {
+      ['meshes/skyrim.nif'] = SkyrimFile,
+      ['meshes/unknown.nif'] = (string.gsub(SkyrimFile, 'NiNode', 'XiNode', 1)),
+      ['meshes/all_types.nif'] = AllTypes,
+      ['meshes/junk.nif'] = 'not a model',
+    })
+    local made = assets.sources(nil, nil, { jess.fs.join(root, 'meshes') })
+    local byPath: { [string]: assets.Target } = {}
+    for _, target in made.targets do
+      byPath[target.path] = target
+    end
+
+    local skyrim = assets.dump(made, byPath['meshes/skyrim.nif'])
+    expect(skyrim.roots).toEqual { 0 }
+    expect(#skyrim.records).toBe(1)
+    expect(skyrim.records[1].index).toBe(0)
+    expect(skyrim.records[1].type).toBe 'NiNode'
+    expect(skyrim.records[1].name).toBe 'Scene Root'
+    expect(skyrim.records[1].flags).toBe(14)
+    expect(assets.dump(made, byPath['meshes/skyrim.nif'], { list = true }).records).toEqual {
+      { index = 0, type = 'NiNode', name = 'Scene Root' },
+    }
+    expect(assets.dump(made, byPath['meshes/skyrim.nif'], { types = { 'NiCamera' } }).records).toEqual {}
+    expect(assets.dump(made, byPath['meshes/skyrim.nif'], { name = '^scene' }).records[1].index).toBe(0)
+    expect(assets.dump(made, byPath['meshes/skyrim.nif'], { name = 'root$', indices = { 1 } }).records).toEqual {}
+
+    expect(function() assets.dump(made, byPath['meshes/unknown.nif']) end).toThrow 'meshes/unknown.nif: XiNode: Unknown record type XiNode'
+    -- The editable model reads Morrowind's records that OpenMW refuses, so they can be dumped.
+    expect(#assets.dump(made, byPath['meshes/all_types.nif'], { list = true }).records).toBe(85)
+    expect(assets.dump(made, byPath['meshes/all_types.nif'], { indices = { 1 } }).records[1].type).toBe 'NiBltSource'
+    expect(function() assets.dump(made, byPath['meshes/junk.nif']) end).toThrow 'meshes/junk.nif: truncated version line at offset 0'
+
+    jess.fs.remove(jess.fs.join(root, 'meshes/skyrim.nif'))
+    expect(function() assets.dump(made, byPath['meshes/skyrim.nif']) end).toThrow 'failed to read meshes/skyrim.nif: '
+  end)
+end)
+
+suite.describe('edit', function()
+  suite.it('opens a Morrowind model to change, with the loose file it came from', function()
+    local root = mod 'edit'
+    local file = jess.fs.join(root, 'mod/Meshes/x/shape.nif')
+    local made = assets.sources(nil, nil, { file })
+    local editable = assets.edit(made, made.targets[1])
+    expect(editable.path).toBe 'meshes/x/shape.nif'
+    expect(editable.file).toBe(file)
+    expect(buffer.tostring(editable.nif:save())).toBe(buffer.tostring(shape 'textures\\tx_a.tga'))
+    expect(editable.nif:setTexture('textures/tx_a.tga', 'tx_b.dds')).toBe(1)
+    expect(editable.nif:textures()).toEqual { { record = 2, path = 'tx_b.dds' } }
+  end)
+
+  suite.it('has no file for a model in an archive, and refuses another game\'s', function()
+    local root = tree('edit-archive', { ['meshes/skyrim.nif'] = SkyrimFile, ['meshes/junk.nif'] = 'not a model' })
+    local path = jess.fs.join(root, 'Pack.bsa')
+    pack(path, { ['meshes/a/packed.nif'] = shape() })
+
+    local packed = assets.sources(nil, nil, { path })
+    local editable = assets.edit(packed, packed.targets[1])
+    expect(editable.path).toBe 'meshes/a/packed.nif'
+    expect(editable.file).toBeNil()
+    expect(editable.nif:reachableCount()).toBe(3)
+
+    local made = assets.sources(nil, nil, { jess.fs.join(root, 'meshes') })
+    expect(function() assets.edit(made, made.targets[2]) end).toThrow 'meshes/skyrim.nif is a Skyrim 20.2.0.7 NIF; jess only edits Morrowind (4.0.0.2) NIFs so far'
+    expect(function() assets.edit(made, made.targets[1]) end).toThrow 'meshes/junk.nif: truncated version line at offset 0'
+  end)
+end)
+
 return suite

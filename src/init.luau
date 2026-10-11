@@ -7,7 +7,8 @@
 OpenMW finds them: a port of jess-assets' NIF reports. NIFs come from sources: files, data
 folders, and archives given as inputs, and a load order's VFS (an `@openmw` Context's `vfs()`)
 underneath them, where textures are looked up too. A file inside a `meshes` folder brings that
-folder's data folder along, so its textures resolve against its own mod.
+folder's data folder along, so its textures resolve against its own mod. `dump` and `edit` read
+one of those NIFs: its records as plain data, and the model to change it through.
 
 The load order is taken as its `@vfs` VFS, not as the Context that made it: the VFS is all that
 is read of one, so this depends on `@nif` and `@vfs` alone, and a caller without an openmw.cfg
@@ -24,6 +25,7 @@ local Fix = require '@nif/fix'
 local Header = require '@nif/header'
 local Info = require '@nif/info'
 local Nif = require '@nif'
+local Plain = require '@self/plain'
 local Reader = require '@nif/gamebryo'
 local Vfs = require '@vfs'
 
@@ -731,6 +733,171 @@ local function infoSources(made: Sources): { InfoReport }
   return reports
 end
 
+--- A target's bytes, for a caller with nothing to report but the failure.
+local function targetBytes(made: Sources, target: Target): buffer
+  -- As in `checkTarget`: a target that has gone, or one `@vfs` can't read, throws.
+  local ok, bytes = pcall(readTarget, made, target)
+  if not ok then error(`failed to read {target.path}: {bytes}`, 0) end
+
+  return bytes
+end
+
+--- A target's header, or OpenMW's reason for refusing it, after the file's name.
+local function targetHeader(target: Target, bytes: buffer): Header.Header
+  -- The header reader throws OpenMW's message for a header it refuses.
+  local parsed, header = pcall(Header.parse, bytes)
+  if not parsed then error(`{target.path}: {header}`, 0) end
+
+  return header
+end
+
+--- A Morrowind NIF read to edit: the model, the loose file it came from (nil inside an archive),
+--- and its VFS path, or the name it was given as.
+export type Editable = { nif: Nif.Nif, file: string?, path: string }
+
+--- Reads a target to edit. Only Morrowind's NIFs fit the editable model, so any other game's is
+--- refused, with the game and version it is.
+local function edit(made: Sources, target: Target): Editable
+  local bytes = targetBytes(made, target)
+  local header = targetHeader(target, bytes)
+  if header.version ~= Header.versions.morrowind then
+    error(
+      `{target.path} is a {Header.game(header)} {Header.versionString(header.version)} NIF; jess only edits Morrowind (4.0.0.2) NIFs so far`,
+      0
+    )
+  end
+
+  -- The model throws for a record it can't read.
+  local opened, nif = pcall(Nif.open, bytes)
+  if not opened then error(`{target.path}: {nif}`, 0) end
+
+  return { nif = nif, file = targetFile(made, target), path = target.path }
+end
+
+export type DumpOptions = {
+  --- Only records of these types, ignoring case; every type without any.
+  types: { string }?,
+  --- Only the records at these 0-based indices; every one without any.
+  indices: { number }?,
+  --- Only records whose name matches this case-insensitive regex.
+  name: string?,
+  --- Each record's `index`, `type`, and `name` (when it has one) only.
+  list: boolean?,
+}
+
+--- A NIF's records: where it came from, the root links as the file has them (-1 for none), and
+--- each record `options` picks as plain data, its fields by name with its 0-based `index` and
+--- `type`. A link is the index of the record it points to.
+export type Dump = {
+  path: string,
+  source: string,
+  roots: { number },
+  records: { { [string]: unknown } },
+}
+
+--- The records of another game's NIF that `options` picks, read as OpenMW reads them.
+local function gamebryoRecords(
+  file: Reader.File,
+  options: DumpOptions,
+  pattern: Regex?
+): { { [string]: unknown } }
+  local types: { [string]: boolean }? = nil
+  if options.types and #options.types > 0 then
+    local wanted: { [string]: boolean } = {}
+    for _, name in options.types do
+      wanted[string.lower(name)] = true
+    end
+
+    types = wanted
+  end
+
+  local indices = if options.indices and #options.indices > 0 then options.indices else nil
+  local records: { { [string]: unknown } } = {}
+  for slot, record in file.records :: { { [string]: unknown } } do
+    local index, typeName = slot - 1, file.names[slot]
+    if types and not types[string.lower(typeName)] then continue end
+
+    if indices and not table.find(indices, index) then continue end
+
+    local name = record.name
+    if pattern and (type(name) ~= 'string' or not pattern:isMatch(name)) then continue end
+
+    if options.list then
+      table.insert(records, {
+        index = index,
+        type = typeName,
+        name = if type(name) == 'string' and name ~= '' then name else nil,
+      })
+      continue
+    end
+
+    -- A class with a `type` field of its own keeps it, as jess-nif's dump did.
+    local entry = Plain.plain(record) :: { [string]: unknown }
+    entry.index = index
+    if entry.type == nil then entry.type = typeName end
+
+    table.insert(records, entry)
+  end
+
+  return records
+end
+
+--- A target's records, read by the reader for its version: the editable model for Morrowind's,
+--- `@nif/gamebryo` for every other version OpenMW reads.
+local function dump(made: Sources, target: Target, options: DumpOptions?): Dump
+  local settings: DumpOptions = options or {}
+  local pattern: Regex? = nil
+  if settings.name then
+    -- `jess.regex.new` throws for a pattern Rust's regex crate rejects, with its reason.
+    local compiled, regex = pcall(jess.regex.new, settings.name, { caseInsensitive = true })
+    if not compiled then error(`invalid name regex: {regex}`, 0) end
+
+    pattern = regex
+  end
+
+  local bytes = targetBytes(made, target)
+  local header = targetHeader(target, bytes)
+  if header.version ~= Header.versions.morrowind then
+    -- The multi-version reader throws `{ message, record }` for a file OpenMW refuses.
+    local read, file = pcall(Reader.open, bytes)
+    if not read then
+      local problem = file :: unknown
+      if type(problem) ~= 'table' then error(`{target.path}: {problem}`, 0) end
+
+      local refusal = problem :: { message: string, record: number? }
+      local recordType = if refusal.record then Header.recordType(header, refusal.record) else nil
+      local prefix = if recordType then `{recordType}: ` else ''
+      error(`{target.path}: {prefix}{refusal.message}`, 0)
+    end
+
+    return {
+      path = target.path,
+      source = target.source,
+      roots = table.clone(file.roots),
+      records = gamebryoRecords(file, settings, pattern),
+    }
+  end
+
+  -- The model throws for a record it can't read.
+  local opened, nif = pcall(Nif.open, bytes)
+  if not opened then error(`{target.path}: {nif}`, 0) end
+
+  -- An empty list of types or indices picks every record here, and none in the model's `dump`.
+  local dumped = nif:dump {
+    type = if settings.types and #settings.types > 0 then settings.types else nil,
+    index = if settings.indices and #settings.indices > 0 then settings.indices else nil,
+    name = settings.name,
+    list = settings.list,
+  }
+
+  local records = table.create(#dumped.records) :: { { [string]: unknown } }
+  for position, record in dumped.records do
+    records[position] = Plain.plain(record) :: { [string]: unknown }
+  end
+
+  return { path = target.path, source = target.source, roots = dumped.roots, records = records }
+end
+
 export type FixOptions = {
   --- The fixes to make (`rcn`, `ncc`, `markers`, `skinWeights`, `unreachable`); every one by
   --- default.
@@ -878,5 +1045,7 @@ return table.freeze {
   shown = shown,
   infoBytes = infoBytes,
   info = infoSources,
+  edit = edit,
+  dump = dump,
   fix = fixSources,
 }
