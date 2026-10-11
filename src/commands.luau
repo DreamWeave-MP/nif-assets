@@ -1,0 +1,234 @@
+--!strict
+--!native
+-- SPDX-License-Identifier: MIT OR Apache-2.0
+
+--[[
+@nif-assets/commands: what `jess nif` did between reading its arguments and printing, one
+function per command. Each takes one request, a table of plain data, and returns one result, a
+table of plain data tagged with the command that made it: everything a person at a terminal
+would have been shown, and nothing worded or laid out for one.
+
+  check(request)   what OpenMW makes of every NIF the inputs hold
+  info(request)    each NIF's header, records, collision, textures, and scene graph
+  dump(request)    one NIF's records, field by field
+  fix(request)     the repairs with one right answer, and where each fixed file went
+  modify(request)  an edit of one Morrowind NIF, written if it changed anything
+
+Inputs are NIF or KF files, data folders, archives, or VFS paths the `data` holds; `data` are
+folders and archives textures and VFS paths are looked up in, later ones winning and the inputs
+winning over all of them. There is no load order behind any of it.
+
+Nothing here reads an argument list, the environment, or standard input, and nothing prints. What
+a command finds in a file is in its result: a model OpenMW won't load, a file that couldn't be
+fixed and why. A request that can't be carried out at all raises its reason as a string: an
+input that isn't there, a dump of more than one file, a regex that doesn't compile. `fix` and
+`modify` write only when `dryRun` isn't set.
+]]
+
+local assets = require '@nif-assets'
+local Fix = require '@nif/fix'
+local Nif = require '@nif'
+
+--- A severity as a report spells it, worst first.
+export type Level = 'wontLoad' | 'broken' | 'missingAsset' | 'collision' | 'performance' | 'info'
+
+export type CheckRequest = {
+  inputs: { string },
+  data: { string }?,
+  --- The least severe findings the result lists; `collision` without one. Files left with no
+  --- finding to list are left out.
+  show: Level?,
+  --- List every file, with or without findings.
+  everyFile: boolean?,
+}
+
+--- `report.summary` counts every file checked, whatever `show` left out of `report.files`.
+export type CheckResult = { command: 'check', report: assets.CheckReport }
+
+export type InfoRequest = {
+  inputs: { string },
+  data: { string }?,
+  --- Whether each file's scene graph is described; true without it.
+  tree: boolean?,
+}
+
+export type InfoResult = { command: 'info', files: { assets.InfoReport } }
+
+export type DumpRequest = {
+  --- The one NIF or KF: a file, or its VFS path in `data`.
+  input: string,
+  data: { string }?,
+  --- Only records of these types, ignoring case.
+  types: { string }?,
+  --- Only the records at these 0-based indices.
+  indices: { number }?,
+  --- Only records whose name matches this case-insensitive regex.
+  name: string?,
+  --- Each record's index, type, and name only.
+  list: boolean?,
+}
+
+--- `roots` are the root links as the file has them, -1 for none. Each record is its fields by
+--- name, with its 0-based `index` and its `type`; a link is the index of the record it names.
+export type DumpResult = {
+  command: 'dump',
+  path: string,
+  source: string,
+  roots: { number },
+  records: { { [string]: unknown } },
+}
+
+export type FixRequest = {
+  inputs: { string },
+  data: { string }?,
+  --- The fixes to make; every one without any.
+  only: { Fix.Kind }?,
+  --- Report what would change without writing anything.
+  dryRun: boolean?,
+  --- Whether a file written over is backed up first (`.bak`, `.bak1`, ...); true without it.
+  backup: boolean?,
+  --- A data folder to write fixed files into at their VFS paths, instead of over the originals.
+  --- A file inside an archive can only be written this way.
+  output: string?,
+}
+
+--- `report.files` lists only the files that needed a fix: each with its fixes, the file written
+--- and the backup kept (`written`), or why it wasn't fixed or written (`skipped`).
+export type FixResult = { command: 'fix', dryRun: boolean, report: assets.FixReport }
+
+export type ModifyRequest = {
+  --- The one Morrowind NIF or KF: a file, or its VFS path in `data`.
+  input: string,
+  data: { string }?,
+  --- The edit: it is handed the NIF and the path of the file it came from.
+  edit: (nif: Nif.Nif, path: string) -> (),
+  --- What the edit is called in the result: a script's path, when it came from one.
+  script: string?,
+  --- The file to write instead of the input. A NIF inside an archive needs one.
+  output: string?,
+  --- Run the edit and say whether it changed the NIF, writing nothing.
+  dryRun: boolean?,
+  --- Whether a file written over is backed up first; true without it.
+  backup: boolean?,
+}
+
+--- `input` is the request's; `path` is the file read, or the VFS path of one in an archive.
+--- `written` is set when the edit changed the NIF and this wasn't a dry run.
+export type ModifyResult = {
+  command: 'modify',
+  input: string,
+  path: string,
+  script: string?,
+  changed: boolean,
+  dryRun: boolean,
+  written: { path: string, backup: string? }?,
+}
+
+export type Result = CheckResult | InfoResult | DumpResult | FixResult | ModifyResult
+
+--- The one NIF `input` names, with the sources it was found in.
+local function single(command: string, input: string, data: { string }?): (assets.Sources, assets.Target)
+  local sources = assets.sources(nil, data, { input })
+  if #sources.targets ~= 1 then error(`{command} takes one NIF or KF file`, 0) end
+
+  return sources, sources.targets[1]
+end
+
+--- Checks every NIF the inputs hold the way OpenMW loads them.
+local function check(request: CheckRequest): CheckResult
+  local sources = assets.sources(nil, request.data, request.inputs)
+  if #sources.targets == 0 then error('no NIF or KF files to check', 0) end
+
+  local report = assets.check(sources)
+  return {
+    command = 'check',
+    report = assets.shown(report, request.show or 'collision', request.everyFile or false),
+  }
+end
+
+--- Describes every NIF the inputs hold.
+local function info(request: InfoRequest): InfoResult
+  local files = assets.info(assets.sources(nil, request.data, request.inputs))
+  -- `tree` is on unless it is turned off, so nil keeps the trees and only false drops them.
+  if request.tree == false then
+    for position, file in files do
+      local bare = table.clone(file)
+      bare.tree = {}
+      files[position] = bare
+    end
+  end
+
+  return { command = 'info', files = files }
+end
+
+--- One NIF's records, down to the ones the request picks.
+local function dump(request: DumpRequest): DumpResult
+  local sources, target = single('dump', request.input, request.data)
+  local dumped = assets.dump(sources, target, {
+    types = request.types,
+    indices = request.indices,
+    name = request.name,
+    list = request.list,
+  })
+
+  return {
+    command = 'dump',
+    path = dumped.path,
+    source = dumped.source,
+    roots = dumped.roots,
+    records = dumped.records,
+  }
+end
+
+--- Repairs what has one clear fix in every NIF the inputs hold, writing each fixed file over the
+--- original after a backup, or into the `output` folder.
+local function fix(request: FixRequest): FixResult
+  local sources = assets.sources(nil, request.data, request.inputs)
+  local report = assets.fix(sources, {
+    only = if request.only and #request.only > 0 then request.only else nil,
+    dryRun = request.dryRun,
+    output = request.output,
+    backup = request.backup,
+  })
+
+  return { command = 'fix', dryRun = request.dryRun or false, report = report }
+end
+
+--- Runs the request's edit on one Morrowind NIF, and writes the NIF if its bytes changed.
+local function modify(request: ModifyRequest): ModifyResult
+  local sources, target = single('modify', request.input, request.data)
+  local editable = assets.edit(sources, target)
+  local destination = request.output or editable.file
+  if not destination then
+    error(`{editable.path} is in an archive, so the modified NIF needs an output file`, 0)
+  end
+
+  local path = editable.file or target.path
+  local original = buffer.tostring(editable.nif:save())
+  request.edit(editable.nif, path)
+  local saved = editable.nif:save()
+  local changed = buffer.tostring(saved) ~= original
+
+  local written
+  if changed and not request.dryRun then
+    written = jess.fs.write(destination, saved, { backup = request.backup ~= false })
+  end
+
+  return {
+    command = 'modify',
+    input = request.input,
+    path = path,
+    script = request.script,
+    changed = changed,
+    dryRun = request.dryRun or false,
+    written = written,
+  }
+end
+
+return table.freeze {
+  check = check,
+  info = info,
+  dump = dump,
+  fix = fix,
+  modify = modify,
+}

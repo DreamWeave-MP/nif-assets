@@ -1,0 +1,138 @@
+--!strict
+--!native
+-- What the command suites share: the models jess's own `nif` harness built (a rock, a file whose
+-- only root is pixel data, a rug with a lowercase `ncc`, a textured shape), made with `@nif`, and
+-- the folders they go in under the scratch root.
+local nif = require '@nif'
+
+local scratch = assert(rawget(_G, 'scratchRoot') :: string?, 'the suite needs a host-owned scratchRoot')
+
+local Triangle = { { 0, 0, 0 }, { 1, 0, 0 }, { 0, 1, 0 } }
+
+--- A node named `Rock` over a shape named `Tri Rock`: the shape's data is record 0, the shape 1,
+--- and the node, the only root, 2.
+local function rock(): buffer
+  local file = nif.new()
+  local shape = file:shape { name = 'Tri Rock', vertices = Triangle, triangles = { { 0, 1, 2 } } }
+  local root = file:insert { type = 'NiNode', name = 'Rock' }
+  file:attach(root, shape)
+  file.roots = { root }
+
+  return file:save()
+end
+
+--- A file whose only root is pixel data, which OpenMW won't load.
+local function broken(): buffer
+  local file = nif.new()
+  file.roots = { file:insert { type = 'NiPixelData' } }
+
+  return file:save()
+end
+
+--- A node whose string data is a lowercase `ncc`: the string data is record 0, the node 1.
+local function rug(): buffer
+  local file = nif.new()
+  local lowercase = file:insert { type = 'NiStringExtraData', value = 'ncc', bytesRemaining = 7 }
+  local root = file:insert { type = 'NiNode' }
+  local node = file:record(root) :: { [string]: unknown }
+  node.extraData = lowercase
+  file.roots = { root }
+
+  return file:save()
+end
+
+--- A shape under a root node, drawn with `texture`.
+local function textured(texture: string): buffer
+  local file = nif.new()
+  local root = file:insert { type = 'NiNode' }
+  file:shape { vertices = Triangle, triangles = { { 0, 1, 2 } }, texture = texture, parent = root }
+  file.roots = { root }
+
+  return file:save()
+end
+
+--- A lone node, the only record and the only root.
+local function node(): buffer
+  local file = nif.new()
+  file.roots = { file:insert { type = 'NiNode' } }
+
+  return file:save()
+end
+
+--- A fresh folder `name` under the scratch root's `suite` folder, holding `files` by their paths
+--- below it.
+local function tree(suite: string, name: string, files: { [string]: string | buffer }): string
+  local root = jess.fs.join(scratch, suite, name)
+  if jess.fs.exists(root) then jess.fs.remove(root) end
+
+  jess.fs.createDir(root)
+  for path, data in files do
+    jess.fs.write(jess.fs.join(root, path), data)
+  end
+
+  return root
+end
+
+--- The harness's data folder: a good model and one whose only root is pixel data, under meshes.
+local function dataFolder(suite: string, name: string): string
+  return tree(suite, name, { ['meshes/rock.nif'] = rock(), ['meshes/broken.nif'] = broken() })
+end
+
+local function u32(value: number): string return string.pack('<I4', value) end
+
+local function i32(value: number): string return string.pack('<i4', value) end
+
+local function f32(value: number): string return string.pack('<f', value) end
+
+local function sized(text: string): string return u32(#text) .. text end
+
+local function short(text: string): string return string.pack('<I1', #text) .. text end
+
+local IdentityRows = string.rep(f32(1) .. f32(0) .. f32(0) .. f32(0), 2) .. f32(1)
+
+local SkyrimNode = i32(0)
+  .. u32(0)
+  .. i32(-1)
+  .. u32(14)
+  .. f32(1)
+  .. f32(2)
+  .. f32(3)
+  .. IdentityRows
+  .. f32(1)
+  .. i32(-1)
+  .. u32(0)
+  .. u32(0)
+
+--- A Skyrim file (20.2.0.7, user version 12, stream 83) holding one `NiNode` named
+--- `Scene Root`, as `@nif`'s own suite writes it: a model of another game.
+local Skyrim = 'Gamebryo File Format, Version 20.2.0.7\n'
+  .. u32(0x14020007)
+  .. string.pack('<I1', 1)
+  .. u32(12)
+  .. u32(1)
+  .. u32(83)
+  .. short 'author\0'
+  .. short 'process\0'
+  .. short 'export\0'
+  .. string.pack('<I2', 1)
+  .. sized 'NiNode'
+  .. string.pack('<I2', 0)
+  .. u32(#SkyrimNode)
+  .. u32(1)
+  .. u32(10)
+  .. sized 'Scene Root'
+  .. u32(0)
+  .. SkyrimNode
+  .. u32(1)
+  .. i32(0)
+
+return table.freeze {
+  rock = rock,
+  broken = broken,
+  rug = rug,
+  textured = textured,
+  node = node,
+  tree = tree,
+  dataFolder = dataFolder,
+  skyrim = Skyrim,
+}

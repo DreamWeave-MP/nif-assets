@@ -1,0 +1,489 @@
+--!strict
+--!native
+-- `@nif-assets/commands`: every scenario jess's `nif` harness ran through the command line, here
+-- as a request handed over and a result looked at. Nothing is captured, because nothing prints:
+-- what a command found, wrote, or couldn't do is in the table it returns.
+local archive = require '@dream-archive'
+local commands = require '@nif-assets/commands'
+local nif = require '@nif'
+local support = require './support'
+local test = require '@jess/test'
+
+local expect = test.expect
+local suite = test.new()
+
+local Suite = 'nif-assets-commands'
+
+local function paths<Item>(items: { Item & { path: string } }): { string }
+  local out = {}
+  for _, item in items do
+    table.insert(out, item.path)
+  end
+
+  table.sort(out)
+  return out
+end
+
+--- A Morrowind archive at `path` holding `files` by their VFS paths.
+local function pack(path: string, files: { [string]: string | buffer })
+  local builder = archive.bsa.tes3.Builder.new()
+  local names = {}
+  for name in files do
+    table.insert(names, name)
+  end
+
+  table.sort(names)
+  for _, name in names do
+    local data = files[name]
+    builder:addBytes(name, if type(data) == 'string' then data else buffer.tostring(data))
+  end
+
+  builder:writePath(path)
+end
+
+--- An edit that names the NIF's first root.
+local function rename(name: string): (file: nif.Nif, path: string) -> ()
+  return function(file: nif.Nif)
+    local root = file:record(file.roots[1]) :: { [string]: unknown }
+    root.name = name
+  end
+end
+
+suite.describe('check', function()
+  suite.it('counts a model that won\'t load, and lists it', function()
+    local root = support.dataFolder(Suite, 'check')
+    local result = commands.check { inputs = { root } }
+    expect(result.command).toBe 'check'
+    expect(result.report.summary.files).toBe(2)
+    expect(result.report.summary.wontLoad).toBe(1)
+
+    -- Files without findings at the shown level are left out.
+    expect(#result.report.files).toBe(1)
+    expect(result.report.files[1].path).toBe 'meshes/broken.nif'
+    expect(result.report.files[1].findings[1].code).toBe 'noRootNodes'
+  end)
+
+  suite.it('shows what is asked for, and looks textures up in the data folders', function()
+    local root = support.dataFolder(Suite, 'check-show')
+    jess.fs.write(jess.fs.join(root, 'meshes/textured.nif'), support.textured 'tx_there.tga')
+    local textures = jess.fs.join(root, 'textures-only')
+    jess.fs.write(jess.fs.join(textures, 'textures/tx_there.dds'), 'DDS ')
+    local meshes = jess.fs.join(root, 'meshes')
+
+    -- Textures resolve against the data folder the inputs are in, and the summary says no load
+    -- order was searched.
+    local alone = commands.check { inputs = { meshes } }
+    expect(alone.report.summary.texturesChecked).toBe(true)
+    expect(alone.report.summary.loadOrderChecked).toBe(false)
+    expect(paths(alone.report.files)).toEqual { 'meshes/broken.nif', 'meshes/textured.nif' }
+
+    local worst = commands.check { inputs = { meshes }, show = 'wontLoad' }
+    expect(paths(worst.report.files)).toEqual { 'meshes/broken.nif' }
+    expect(worst.report.summary).toEqual(alone.report.summary)
+
+    local every = commands.check { inputs = { meshes }, show = 'info', everyFile = true }
+    expect(#every.report.files).toBe(3)
+
+    -- Every file is listed even when nothing of its is shown.
+    local bare = commands.check { inputs = { meshes }, show = 'wontLoad', everyFile = true }
+    expect(#bare.report.files).toBe(3)
+
+    -- The texture resolves through the data folder, so the textured model has nothing to show.
+    local found = commands.check { inputs = { meshes }, data = { textures } }
+    expect(paths(found.report.files)).toEqual { 'meshes/broken.nif' }
+  end)
+
+  suite.it('checks one loose file, where its textures can\'t be looked up', function()
+    local root = support.tree(Suite, 'check-file', { ['rug.nif'] = support.rug() })
+    local file = jess.fs.join(root, 'rug.nif')
+    local result = commands.check { inputs = { file } }
+    expect(result.report.summary).toEqual {
+      texturesChecked = false,
+      loadOrderChecked = false,
+      files = 1,
+      deeplyChecked = 1,
+      wontLoad = 0,
+      byWorstSeverity = { collision = 1 },
+      byCode = { lowercaseNcc = 1 },
+    }
+    expect(result.report.files[1].path).toBe 'rug.nif'
+    expect(result.report.files[1].source).toBe(file)
+    expect(result.report.files[1].findings).toEqual {
+      {
+        severity = 'collision',
+        code = 'lowercaseNcc',
+        message = '"ncc" turns collision off entirely; only an uppercase "NCC" keeps camera collision',
+        record = 0,
+      },
+    }
+  end)
+
+  suite.it('raises when the inputs hold no model, and when one isn\'t there', function()
+    local root = support.tree(Suite, 'check-none', { ['textures/tx.dds'] = 'DDS ' })
+    expect(function() commands.check { inputs = { root } } end).toThrow 'no NIF or KF files to check'
+
+    local missing = jess.fs.join(root, 'missing.nif')
+    expect(function() commands.check { inputs = { missing } } end).toThrow(`'{missing}' doesn't exist`)
+  end)
+end)
+
+suite.describe('info', function()
+  suite.it('describes the scene graph', function()
+    local root = support.dataFolder(Suite, 'info')
+    local result = commands.info { inputs = { jess.fs.join(root, 'meshes/rock.nif') } }
+    expect(result.command).toBe 'info'
+
+    local file = result.files[1]
+    expect(file.game).toBe 'Morrowind'
+    expect(file.recordTypes.NiTriShape).toBe(1)
+    expect((file.collision :: { source: string }).source).toBe 'renderGeometry'
+    expect(file.tree).toEqual {
+      {
+        index = 2,
+        type = 'NiNode',
+        name = 'Rock',
+        children = {
+          {
+            index = 1,
+            type = 'NiTriShape',
+            name = 'Tri Rock',
+            shape = { data = { index = 0, type = 'NiTriShapeData' }, vertices = 3, triangles = 1 },
+          },
+        },
+      },
+    }
+  end)
+
+  suite.it('leaves out the tree when asked', function()
+    local root = support.dataFolder(Suite, 'info-no-tree')
+    local result = commands.info { inputs = { jess.fs.join(root, 'meshes/rock.nif') }, tree = false }
+    expect(result.files[1].tree).toEqual {}
+    expect(result.files[1].recordTypes.NiTriShape).toBe(1)
+  end)
+
+  suite.it('says why a file can\'t be read, as far as it got', function()
+    local root = support.dataFolder(Suite, 'info-broken')
+    local result = commands.info { inputs = { jess.fs.join(root, 'meshes') } }
+    expect(paths(result.files)).toEqual { 'meshes/broken.nif', 'meshes/rock.nif' }
+    expect(result.files[1].error).toBe 'Found no root nodes'
+    expect(result.files[2].error).toBeNil()
+  end)
+end)
+
+suite.describe('dump', function()
+  suite.it('lists and dumps records, links as record indices', function()
+    local root = support.dataFolder(Suite, 'dump')
+    local rock = jess.fs.join(root, 'meshes/rock.nif')
+
+    local listed = commands.dump { input = rock, list = true }
+    expect(listed).toEqual {
+      command = 'dump',
+      path = 'meshes/rock.nif',
+      source = rock,
+      roots = { 2 },
+      records = {
+        { index = 0, type = 'NiTriShapeData' },
+        { index = 1, type = 'NiTriShape', name = 'Tri Rock' },
+        { index = 2, type = 'NiNode', name = 'Rock' },
+      },
+    }
+
+    local shapes = commands.dump { input = rock, types = { 'nitrishape' } }
+    expect(#shapes.records).toBe(1)
+    expect(shapes.records[1]).toEqual {
+      index = 1,
+      type = 'NiTriShape',
+      name = 'Tri Rock',
+      flags = 0,
+      geometryData = 0,
+      properties = {},
+      translation = { 0, 0, 0 },
+      rotation = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } },
+      scale = 1,
+      velocity = { 0, 0, 0 },
+    }
+
+    local data = commands.dump { input = rock, indices = { shapes.records[1].geometryData :: number } }
+    expect(#data.records).toBe(1)
+    expect(data.records[1].type).toBe 'NiTriShapeData'
+    expect(data.records[1].vertices).toEqual { { 0, 0, 0 }, { 1, 0, 0 }, { 0, 1, 0 } }
+    expect(data.records[1].triangles).toEqual { { 0, 1, 2 } }
+  end)
+
+  suite.it('narrows by type, index, and name together', function()
+    local root = support.dataFolder(Suite, 'dump-filters')
+    local rock = jess.fs.join(root, 'meshes/rock.nif')
+    local function indices(request: commands.DumpRequest): { number }
+      local out = {}
+      for _, record in commands.dump(request).records do
+        table.insert(out, record.index :: number)
+      end
+
+      return out
+    end
+
+    expect(indices { input = rock, list = true, types = { 'NiNode', 'NiTriShape' } }).toEqual { 1, 2 }
+    expect(indices { input = rock, list = true, types = { 'NiNode', 'NiTriShape' }, indices = { 0, 1 } }).toEqual {
+      1,
+    }
+    expect(indices { input = rock, list = true, name = '^ROCK$' }).toEqual { 2 }
+    expect(indices { input = rock, list = true, name = 'rock', types = { 'NiTriShape' } }).toEqual { 1 }
+    expect(indices { input = rock, list = true, name = 'nothing is called this' }).toEqual {}
+
+    -- No types and no indices are every record, as no filter is.
+    expect(indices { input = rock, list = true, types = {}, indices = {} }).toEqual { 0, 1, 2 }
+  end)
+
+  suite.it('finds its input by VFS path in a data folder or archive, later ones winning', function()
+    local root = support.dataFolder(Suite, 'dump-vfs')
+    local packed = jess.fs.join(root, 'Pack.bsa')
+    pack(packed, { ['meshes/rock.nif'] = support.node(), ['meshes/only.nif'] = support.node() })
+
+    local loose = commands.dump { input = 'Meshes\\Rock.nif', data = { packed, root }, list = true }
+    expect(loose.path).toBe 'meshes/rock.nif'
+    expect(loose.source).toBe(jess.fs.join(root, 'meshes/rock.nif'))
+    expect(#loose.records).toBe(3)
+
+    local archived = commands.dump { input = 'meshes/rock.nif', data = { root, packed }, list = true }
+    expect(archived.source).toBe(packed)
+    expect(archived.records).toEqual { { index = 0, type = 'NiNode' } }
+
+    expect(function() commands.dump { input = 'meshes/rock.nif' } end).toThrow '\'meshes/rock.nif\' doesn\'t exist'
+  end)
+
+  suite.it('dumps another game\'s model the way OpenMW reads it', function()
+    local root = support.tree(Suite, 'dump-skyrim', { ['skyrim.nif'] = support.skyrim })
+    local file = jess.fs.join(root, 'skyrim.nif')
+    local listed = commands.dump { input = file, list = true }
+    expect(listed.roots).toEqual { 0 }
+    expect(listed.records).toEqual { { index = 0, type = 'NiNode', name = 'Scene Root' } }
+
+    local whole = commands.dump { input = file, types = { 'ninode' }, name = 'scene' }
+    expect(#whole.records).toBe(1)
+    expect(whole.records[1].index).toBe(0)
+    expect(whole.records[1].type).toBe 'NiNode'
+    expect(whole.records[1].name).toBe 'Scene Root'
+    expect(whole.records[1].flags).toBe(14)
+    expect(#commands.dump({ input = file, types = { 'NiTriShape' } }).records).toBe(0)
+    expect(#commands.dump({ input = file, indices = { 3 } }).records).toBe(0)
+  end)
+
+  suite.it('raises for more than one file, a regex that doesn\'t compile, and a file OpenMW refuses', function()
+    local root = support.dataFolder(Suite, 'dump-refusals')
+    local rock = jess.fs.join(root, 'meshes/rock.nif')
+    expect(function() commands.dump { input = root } end).toThrow 'dump takes one NIF or KF file'
+    expect(function() commands.dump { input = rock, name = '(' } end).toThrow 'invalid name regex: '
+
+    local junk = jess.fs.join(root, 'meshes/junk.nif')
+    jess.fs.write(junk, 'not a model')
+    expect(function() commands.dump { input = junk } end).toThrow 'meshes/junk.nif: truncated version line at offset 0'
+
+    local unknown = jess.fs.join(root, 'meshes/unknown.nif')
+    jess.fs.write(unknown, (string.gsub(support.skyrim, 'NiNode', 'XiNode', 1)))
+    expect(function() commands.dump { input = unknown } end).toThrow 'meshes/unknown.nif: XiNode: Unknown record type XiNode'
+  end)
+end)
+
+suite.describe('fix', function()
+  suite.it('repairs in place with a backup, or into a folder', function()
+    local root = support.dataFolder(Suite, 'fix')
+    local rug = jess.fs.join(root, 'meshes/rug.nif')
+    jess.fs.write(rug, support.rug())
+    local original = jess.fs.read(rug)
+
+    local dry = commands.fix { inputs = { rug }, only = { 'ncc' }, dryRun = true }
+    expect(dry).toEqual {
+      command = 'fix',
+      dryRun = true,
+      report = {
+        summary = { files = 1, fixed = 1, written = 0, skipped = 0, byFix = { ncc = 1 } },
+        files = {
+          {
+            path = 'meshes/rug.nif',
+            source = rug,
+            fixes = {
+              { fix = 'ncc', message = '"ncc" is now "NCC", so the camera still collides', record = 0 },
+            },
+          },
+        },
+      },
+    }
+    expect(jess.fs.read(rug)).toBe(original)
+
+    -- `check` points at the record `fix` changes: the string data, not the root.
+    local checked = commands.check { inputs = { rug } }
+    local finding
+    for _, found in checked.report.files[1].findings do
+      if found.code == 'lowercaseNcc' then finding = found end
+    end
+
+    expect(finding.record).toBe(dry.report.files[1].fixes[1].record)
+    expect(finding.record).toBe(0)
+
+    local folder = jess.fs.join(root, 'fixed')
+    local into = commands.fix { inputs = { rug }, only = { 'ncc' }, output = folder }
+    local fixed = jess.fs.join(folder, 'meshes/rug.nif')
+    expect(into.dryRun).toBe(false)
+    expect(into.report.files[1].written).toEqual { path = fixed }
+    expect(jess.fs.read(rug)).toBe(original)
+    expect(nif.open(assert(jess.fs.readBuffer(fixed))):record(0)).toEqual {
+      type = 'NiStringExtraData',
+      value = 'NCC',
+      bytesRemaining = 7,
+    }
+
+    -- Fixing into the folder again backs up the earlier fix there, unless told not to.
+    local again = commands.fix { inputs = { rug }, only = { 'ncc' }, output = folder }
+    expect(again.report.files[1].written).toEqual { path = fixed, backup = fixed .. '.bak' }
+    local plain = commands.fix { inputs = { rug }, only = { 'ncc' }, output = folder, backup = false }
+    expect(plain.report.files[1].written).toEqual { path = fixed }
+    expect(jess.fs.exists(fixed .. '.bak1')).toBe(false)
+
+    local inPlace = commands.fix { inputs = { rug }, only = { 'ncc' } }
+    expect(inPlace.report.files[1].written).toEqual { path = rug, backup = rug .. '.bak' }
+    expect(jess.fs.read(rug .. '.bak')).toBe(original)
+    expect(jess.fs.read(rug) ~= original).toBe(true)
+
+    -- Nothing is left to fix.
+    local done = commands.fix { inputs = { rug }, only = { 'ncc' } }
+    expect(done.report.summary.fixed).toBe(0)
+    expect(done.report.files).toEqual {}
+  end)
+
+  suite.it('makes every fix when none is named, and when the list of them is empty', function()
+    local root = support.tree(Suite, 'fix-all', { ['a/rug.nif'] = support.rug(), ['b/rug.nif'] = support.rug() })
+    local every = commands.fix { inputs = { jess.fs.join(root, 'a/rug.nif') }, dryRun = true }
+    local none = commands.fix { inputs = { jess.fs.join(root, 'b/rug.nif') }, only = {}, dryRun = true }
+    expect(every.report.summary.byFix).toEqual { ncc = 1 }
+    expect(none.report.summary.byFix).toEqual { ncc = 1 }
+
+    local other = commands.fix { inputs = { jess.fs.join(root, 'a/rug.nif') }, only = { 'markers' }, dryRun = true }
+    expect(other.report.summary).toEqual { files = 1, fixed = 0, written = 0, skipped = 0, byFix = {} }
+  end)
+
+  suite.it('takes data folders, and raises for one that isn\'t there', function()
+    local root = support.dataFolder(Suite, 'fix-data')
+    local rock = jess.fs.join(root, 'meshes/rock.nif')
+    local textures = jess.fs.join(root, 'textures-only')
+    jess.fs.createDir(textures)
+
+    local result = commands.fix { inputs = { rock }, data = { textures }, dryRun = true }
+    expect(result.report.summary.files).toBe(1)
+
+    local missing = jess.fs.join(root, 'missing')
+    expect(function() commands.fix { inputs = { rock }, data = { missing }, dryRun = true } end).toThrow(
+      `'{missing}' doesn't exist`
+    )
+  end)
+
+  suite.it('says which file it couldn\'t fix, and why: one in an archive with nowhere to go', function()
+    local root = support.tree(Suite, 'fix-archive', {})
+    local packed = jess.fs.join(root, 'Pack.bsa')
+    pack(packed, { ['meshes/rug.nif'] = support.rug() })
+
+    local result = commands.fix { inputs = { packed } }
+    expect(result.report.summary).toEqual { files = 1, fixed = 0, written = 0, skipped = 1, byFix = { ncc = 1 } }
+    expect(result.report.files[1].skipped).toBe 'it\'s in an archive; use --output to write fixed files to a folder'
+    expect(result.report.files[1].written).toBeNil()
+
+    local output = jess.fs.join(root, 'fixed')
+    local extracted = commands.fix { inputs = { packed }, output = output }
+    expect(extracted.report.summary.skipped).toBe(0)
+    expect(extracted.report.files[1].written).toEqual { path = jess.fs.join(output, 'meshes/rug.nif') }
+  end)
+end)
+
+suite.describe('modify', function()
+  suite.it('runs an edit on the NIF, and writes it if the edit changed it', function()
+    local root = support.tree(Suite, 'modify', { ['rock.nif'] = support.node() })
+    local file = jess.fs.join(root, 'rock.nif')
+    local original = jess.fs.read(file)
+
+    local seen: { string } = {}
+    local dry = commands.modify {
+      input = file,
+      script = 'rename.luau',
+      dryRun = true,
+      edit = function(opened: nif.Nif, path: string)
+        table.insert(seen, path)
+        rename 'Renamed'(opened, path)
+      end,
+    }
+
+    expect(dry).toEqual {
+      command = 'modify',
+      input = file,
+      path = file,
+      script = 'rename.luau',
+      changed = true,
+      dryRun = true,
+    }
+    expect(seen).toEqual { file }
+    expect(jess.fs.read(file)).toBe(original)
+
+    local result = commands.modify { input = file, edit = rename 'Renamed' }
+    expect(result.changed).toBe(true)
+    expect(result.dryRun).toBe(false)
+    expect(result.written).toEqual { path = file, backup = file .. '.bak' }
+    expect(jess.fs.read(file .. '.bak')).toBe(original)
+    expect(commands.dump({ input = file }).records[1].name).toBe 'Renamed'
+
+    -- An output file's folders are made for it.
+    local output = jess.fs.join(root, 'out/meshes/rock.nif')
+    local moved = commands.modify { input = file, edit = rename 'Moved', output = output }
+    expect(moved.written).toEqual { path = output }
+    expect(jess.fs.isFile(output)).toBe(true)
+    expect(commands.dump({ input = output }).records[1].name).toBe 'Moved'
+    expect(commands.dump({ input = file }).records[1].name).toBe 'Renamed'
+  end)
+
+  suite.it('writes nothing when the edit left the NIF as it was', function()
+    local root = support.tree(Suite, 'modify-unchanged', { ['rock.nif'] = support.rock() })
+    local file = jess.fs.join(root, 'rock.nif')
+    local result = commands.modify {
+      input = file,
+      edit = function(opened: nif.Nif)
+        -- Reading a record decodes it, and changes nothing.
+        expect((opened:record(2) :: { [string]: unknown }).name).toBe 'Rock'
+      end,
+    }
+    expect(result.changed).toBe(false)
+    expect(result.written).toBeNil()
+    expect(jess.fs.exists(file .. '.bak')).toBe(false)
+  end)
+
+  suite.it('writes without a backup when told to', function()
+    local root = support.tree(Suite, 'modify-plain', { ['rock.nif'] = support.node() })
+    local file = jess.fs.join(root, 'rock.nif')
+    local result = commands.modify { input = file, edit = rename 'Renamed', backup = false }
+    expect(result.written).toEqual { path = file }
+    expect(jess.fs.exists(file .. '.bak')).toBe(false)
+  end)
+
+  suite.it('refuses another game\'s NIF, more than one, and one in an archive with nowhere to go', function()
+    local root = support.dataFolder(Suite, 'modify-refusals')
+    jess.fs.write(jess.fs.join(root, 'meshes/skyrim.nif'), support.skyrim)
+    local packed = jess.fs.join(root, 'Pack.bsa')
+    pack(packed, { ['meshes/packed.nif'] = support.node() })
+
+    local ran = false
+    local function edit() ran = true end
+
+    expect(function() commands.modify { input = jess.fs.join(root, 'meshes/skyrim.nif'), edit = edit } end).toThrow 'meshes/skyrim.nif is a Skyrim 20.2.0.7 NIF; jess only edits Morrowind (4.0.0.2) NIFs so far'
+    expect(function() commands.modify { input = jess.fs.join(root, 'meshes'), edit = edit } end).toThrow 'modify takes one NIF or KF file'
+    expect(function() commands.modify { input = 'meshes/packed.nif', data = { packed }, edit = edit } end).toThrow 'meshes/packed.nif is in an archive, so the modified NIF needs an output file'
+    expect(ran).toBe(false)
+
+    local output = jess.fs.join(root, 'out/packed.nif')
+    local result = commands.modify {
+      input = 'meshes/packed.nif',
+      data = { packed },
+      edit = rename 'Unpacked',
+      output = output,
+    }
+    expect(result.path).toBe 'meshes/packed.nif'
+    expect(result.written).toEqual { path = output }
+  end)
+end)
+
+return suite

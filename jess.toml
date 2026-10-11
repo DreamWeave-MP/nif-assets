@@ -5,7 +5,7 @@ id = "org.dreamweave.nif-assets"
 version = "0.1.0"
 jess_api = "1"
 include = ["src"]
-tests = ["tests/run.luau", "tests/style.luau"]
+tests = ["tests/run.luau", "tests/commands.luau", "tests/style.luau"]
 
 [dependencies]
 "org.dreamweave.nif" = "0.1"
@@ -17,12 +17,14 @@ tests = ["tests/run.luau", "tests/style.luau"]
 
 [modules]
 "@nif-assets" = "src/init.luau"
+"@nif-assets/commands" = "src/commands.luau"
 
-# The module is inert API: it does nothing until something requires it, and runs with the
-# authority of whatever calls it. Its reports read data folders, archives, and NIFs, and `fix`
-# writes the files it repairs.
+# Every module here is inert API: it does nothing until something requires it, and runs with the
+# authority of whatever calls it. The library's reports read data folders, archives, and NIFs, and
+# `fix` writes the files it repairs. `@nif-assets/commands` is what a front end calls: one
+# function per command, a request of plain data in and a result of plain data out.
 
 [[layer]]
 id = "nif-assets.core"
 requires = ["nif.core", "vfs.core"]
-exports = ["@nif-assets"]
+exports = ["@nif-assets", "@nif-assets/commands"]
