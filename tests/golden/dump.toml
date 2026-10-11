@@ -1,6 +1,9 @@
 path = "meshes/rock.nif"
 source = "/mods/rock/meshes/rock.nif"
-roots = [2, -1]
+roots = [
+    2,
+    -1,
+]
 
 [[records]]
 index = 1
