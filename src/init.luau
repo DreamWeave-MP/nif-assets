@@ -302,19 +302,22 @@ local function keysOf(
   layer: number,
   source: string?
 ): { Target }
-  local found: { Target } = {}
-  for _, path in vfs:keys():toTable() do
-    if string.sub(path, 1, #prefix) ~= prefix or not wanted(path) then continue end
+  local paths = [
+    for path in vfs:keys():toTable()
+    if string.sub(path, 1, #prefix) == prefix and wanted(path)
+    => path
+  ]
 
-    local file = vfs:getFile(path) :: Vfs.VfsFile
-    table.insert(found, { path = path, source = source or sourceName(file), layer = layer })
-  end
-
-  table.sort(
-    found,
-    function(left: Target, right: Target): boolean return left.path < right.path end
-  )
-  return found
+  -- A VFS holds a key once, so the targets are in their paths' order when the paths are.
+  table.sort(paths)
+  return [
+    for path in paths
+    => {
+      path = path,
+      source = source or sourceName(vfs:getFile(path) :: Vfs.VfsFile),
+      layer = layer,
+    }
+  ]
 end
 
 --- Adds an input: a NIF file, a data folder, or an archive, or a VFS path the sources hold.
