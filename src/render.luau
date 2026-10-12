@@ -37,7 +37,12 @@ local function snake(name: string): string
 end
 
 local function list<Item>(items: { Item }, each: (Item) -> Value): Value
-  return serialize.array([for entry in items => each(entry)])
+  local out = table.create(#items) :: { Value }
+  for index, entry in items do
+    out[index] = each(entry)
+  end
+
+  return serialize.array(out)
 end
 
 --- Counts by code, the codes in snake_case and in their order: a `BTreeMap` of them.
@@ -370,15 +375,7 @@ local function plainValue(plain: unknown, record: boolean): Value
 
   local fields = plain :: { [unknown]: unknown }
   if next(fields) == nil or fields[1] ~= nil then
-    -- A table with a first entry is a list whatever else it holds, so every entry it has is
-    -- walked, under the key it is at.
-    local entries = plain :: { unknown }
-    local out = table.create(#entries) :: { Value }
-    for index, entry in entries do
-      out[index] = plainValue(entry, false)
-    end
-
-    return serialize.array(out)
+    return list(plain :: { unknown }, function(entry: unknown): Value return plainValue(entry, false) end)
   end
 
   local names: { string }, byName: { [string]: unknown } = {}, {}
@@ -423,17 +420,28 @@ end
 --- writer, as `jess nif dump` streamed them.
 local function dump(result: commands.DumpResult, format: Format): string
   local header = dumpHeader(result, format)
-  local records = [for record in result.records => plainValue(record, true)]
+  local records = table.create(#result.records) :: { Value }
+  for index, record in result.records do
+    records[index] = plainValue(record, true)
+  end
+
   if format ~= 'yaml' then
     serialize.set(header, 'records', serialize.array(records))
     return serialize.encode(header, format) .. (if format == 'json' then '\n' else '')
   end
 
-  local opening = serialize.encode(header, 'yaml')
-  if #records == 0 then return `{opening}records: []\n` end
+  local out = { serialize.encode(header, 'yaml') }
+  if #records == 0 then
+    table.insert(out, 'records: []\n')
+    return table.concat(out)
+  end
 
-  local items = [for record in records => listing.item(record)]
-  return `{opening}records:\n{table.concat(items)}`
+  table.insert(out, 'records:\n')
+  for _, record in records do
+    table.insert(out, listing.item(record))
+  end
+
+  return table.concat(out)
 end
 
 --- A result's document as a value, for every command whose document serde wrote whole.

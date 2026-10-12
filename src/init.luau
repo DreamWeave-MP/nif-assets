@@ -256,7 +256,9 @@ end
 local function addData(sources: Sources, root: string)
   if not jess.fs.exists(root) then error(`'{root}' doesn't exist`, 0) end
 
-  if any[for input in sources.inputs => input.name == root] then return end
+  for _, input in sources.inputs do
+    if input.name == root then return end
+  end
 
   if jess.fs.isDir(root) then
     pushDirectory(sources, root)
@@ -563,7 +565,11 @@ export type CheckReport = {
 --- Checks every target in `made`.
 local function checkSources(made: Sources): CheckReport
   local lookups = hasLookups(made)
-  local files = [for target in made.targets => checkTarget(made, target, lookups)]
+  local files = {}
+  for _, target in made.targets do
+    table.insert(files, checkTarget(made, target, lookups))
+  end
+
   local summary = {
     texturesChecked = lookups,
     loadOrderChecked = made.base ~= nil,
@@ -611,7 +617,11 @@ end
 local function shown(report: CheckReport, show: string, everyFile: boolean): CheckReport
   local files = {}
   for _, file in report.files do
-    local kept = [for finding in file.findings if shows(finding.severity, show) => finding]
+    local kept = {}
+    for _, finding in file.findings do
+      if shows(finding.severity, show) then table.insert(kept, finding) end
+    end
+
     if not everyFile and #kept == 0 then continue end
 
     local copy = table.clone(file)
