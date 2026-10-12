@@ -256,9 +256,7 @@ end
 local function addData(sources: Sources, root: string)
   if not jess.fs.exists(root) then error(`'{root}' doesn't exist`, 0) end
 
-  for _, input in sources.inputs do
-    if input.name == root then return end
-  end
+  if any[for input in sources.inputs => input.name == root] then return end
 
   if jess.fs.isDir(root) then
     pushDirectory(sources, root)
@@ -505,11 +503,7 @@ local function fileReport(
     return left.position < right.position
   end)
 
-  local findings = table.create(#ranked) :: { FindingReport }
-  for position, entry in ranked do
-    findings[position] = entry.finding
-  end
-
+  local findings = [for entry in ranked => entry.finding]
   local header = report.header
   return {
     path = path,
@@ -569,11 +563,7 @@ export type CheckReport = {
 --- Checks every target in `made`.
 local function checkSources(made: Sources): CheckReport
   local lookups = hasLookups(made)
-  local files = {}
-  for _, target in made.targets do
-    table.insert(files, checkTarget(made, target, lookups))
-  end
-
+  local files = [for target in made.targets => checkTarget(made, target, lookups)]
   local summary = {
     texturesChecked = lookups,
     loadOrderChecked = made.base ~= nil,
@@ -621,11 +611,7 @@ end
 local function shown(report: CheckReport, show: string, everyFile: boolean): CheckReport
   local files = {}
   for _, file in report.files do
-    local kept = {}
-    for _, finding in file.findings do
-      if shows(finding.severity, show) then table.insert(kept, finding) end
-    end
-
+    local kept = [for finding in file.findings if shows(finding.severity, show) => finding]
     if not everyFile and #kept == 0 then continue end
 
     local copy = table.clone(file)
@@ -901,11 +887,7 @@ local function dump(made: Sources, target: Target, options: DumpOptions?): Dump
     list = settings.list,
   }
 
-  local records = table.create(#dumped.records) :: { { [string]: unknown } }
-  for position, record in dumped.records do
-    records[position] = Plain.plain(record) :: { [string]: unknown }
-  end
-
+  local records = [for record in dumped.records => Plain.plain(record) :: { [string]: unknown }]
   return { path = target.path, source = target.source, roots = dumped.roots, records = records }
 end
 
@@ -969,9 +951,10 @@ local function fixTarget(made: Sources, target: Target, options: FixOptions): Fi
   local fixed = Fix.fix(nif, options.only)
   if #fixed == 0 then return nil end
 
-  for _, entry in fixed do
-    table.insert(file.fixes, { fix = entry.fix, message = entry.message, record = entry.record })
-  end
+  file.fixes = [
+    for {fix, message, record} in fixed
+    => { fix = fix, message = message, record = record }
+  ]
 
   if options.dryRun then return file end
 
