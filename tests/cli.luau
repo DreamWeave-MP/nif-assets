@@ -475,6 +475,83 @@ suite.describe('render', function()
     expect(record { maps = { { slot = 'base', texture = 3 }, { slot = 'glow', texture = 5 } }, none = {} }).toBe '- maps:\n  - slot: base\n    texture: 3\n  - slot: glow\n    texture: 5\n  none: []\n'
     expect(record { sets = { { { 0, 1 }, { 2, 3 } } } }).toBe '- sets:\n  -\n    - [0, 1]\n    - [2, 3]\n'
   end)
+
+  suite.it('spells every float with the fewest digits that read back as it', function()
+    local function record(value: number): string
+      local result: commands.DumpResult = {
+        command = 'dump',
+        path = 'a.nif',
+        source = 'a.nif',
+        roots = {},
+        records = { { value = value } },
+      }
+
+      return (string.match(cli.render(result), '\n%- value: ([^\n]*)\n$'))
+    end
+
+    local narrow = buffer.create(4)
+
+    --- `value` as the 32-bit float a NIF would store for it.
+    local function stored(value: number): number
+      buffer.writef32(narrow, 0, value)
+      return buffer.readf32(narrow, 0)
+    end
+
+    -- A value a 32-bit float holds exactly is spelled as that float.
+    expect(record(stored(1 / 3))).toBe '0.33333334'
+    expect(record(stored(1.1))).toBe '1.1'
+    expect(record(stored(0.3))).toBe '0.3'
+    expect(record(stored(1e-10))).toBe '1.0e-10'
+    expect(record(-stored(2.5e-5))).toBe '-2.5e-5'
+    expect(record(2 ^ -10)).toBe '0.0009765625'
+    expect(record(100.5)).toBe '100.5'
+
+    -- Any other is spelled as the 64-bit float it is.
+    expect(record(1 / 3)).toBe '0.3333333333333333'
+    expect(record(123456.789)).toBe '123456.789'
+    expect(record(12345678.9)).toBe '12345678.9'
+    expect(record(1.0000001)).toBe '1.0000001'
+    expect(record(0.001)).toBe '0.001'
+    expect(record(1e15 + 0.5)).toBe '1000000000000000.5'
+
+    -- Scientific notation below 1e-4 and from 1e16 up; a whole number below 2^53 has no point.
+    expect(record(1e-5)).toBe '1.0e-5'
+    expect(record(5e-324)).toBe '5.0e-324'
+    expect(record(1.5e300)).toBe '1.5e300'
+    expect(record(1e16)).toBe '1.0e16'
+    expect(record(9.999999e15)).toBe '9999999000000000.0'
+    expect(record(16777216)).toBe '16777216'
+  end)
+
+  suite.it('puts numbers on one line however many, and measures a list holding anything else', function()
+    local function record(fields: { [string]: unknown }): string
+      local result: commands.DumpResult = {
+        command = 'dump',
+        path = 'a.nif',
+        source = 'a.nif',
+        roots = {},
+        records = { fields },
+      }
+
+      return (string.gsub(cli.render(result), '^path: a.nif\nsource: a.nif\nroots: %[%]\nrecords:\n', ''))
+    end
+
+    local eighths = table.create(40, 0.125)
+    expect(record { weights = eighths }).toBe(`- weights: [{string.rep('0.125, ', 39)}0.125]\n`)
+    expect(record { mixed = { 1, 'two', 3.5, true } }).toBe '- mixed: [1, two, 3.5, true]\n'
+
+    -- Each scalar counts with two columns for its separator: 48 and 48 fit, 48 and 49 don't.
+    local short, long = string.rep('a', 48), string.rep('b', 49)
+    expect(record { exact = { short, short } }).toBe(`- exact: [{short}, {short}]\n`)
+    expect(record { over = { short, long } }).toBe(`- over:\n  - {short}\n  - {long}\n`)
+    expect(record { wide = { 1, short, 2.5, short, 3 } }).toBe(
+      `- wide:\n  - 1\n  - {short}\n  - 2.5\n  - {short}\n  - 3\n`
+    )
+
+    -- A list inside a list takes the outer one off the line, whatever comes before it.
+    expect(record { nested = { 1, { 2, 3 }, 'x' } }).toBe '- nested:\n  - 1\n  - [2, 3]\n  - x\n'
+    expect(record { inner = { {}, {} }, values = { 1, 2 } }).toBe '- inner:\n  - []\n  - []\n  values: [1, 2]\n'
+  end)
 end)
 
 suite.describe('status', function()

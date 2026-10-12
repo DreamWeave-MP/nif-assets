@@ -262,6 +262,36 @@ suite.describe('paths', function()
     expect(assets.isNifPath 'meshes/x/a.nif.bak').toBe(false)
     expect(assets.isNifPath 'textures/a.dds').toBe(false)
   end)
+
+  suite.it('spell a path of separators as nothing, and leave what isn\'t ASCII as it is', function()
+    expect(assets.normalize '\\\\//').toBe ''
+    expect(assets.normalize '/').toBe ''
+    expect(assets.normalize '').toBe ''
+    expect(assets.normalize '\\a').toBe 'a'
+    expect(assets.normalize 'Meshes\\\\\\X/\\y.NIF').toBe 'meshes/x/y.nif'
+    expect(assets.normalize 'Textures/CAF\195\137.dds').toBe 'textures/caf\195\137.dds'
+  end)
+
+  suite.it('read the extension off the end of the path, and nothing else as one', function()
+    expect(assets.isNifPath '.nif').toBe(true)
+    expect(assets.isNifPath '.kf').toBe(true)
+    expect(assets.isNifPath 'a.NiF').toBe(true)
+    expect(assets.isNifPath 'a.Kf').toBe(true)
+    expect(assets.isNifPath '').toBe(false)
+    expect(assets.isNifPath 'f').toBe(false)
+    expect(assets.isNifPath 'kf').toBe(false)
+    expect(assets.isNifPath 'nif').toBe(false)
+    expect(assets.isNifPath 'xkf').toBe(false)
+    expect(assets.isNifPath 'a.kif').toBe(false)
+    expect(assets.isNifPath 'a.nkf').toBe(false)
+    expect(assets.isNifPath 'a.nif ').toBe(false)
+
+    -- Bytes that are a letter or the dot but for one bit.
+    expect(assets.isNifPath 'a\14nif').toBe(false)
+    expect(assets.isNifPath 'a\14kf').toBe(false)
+    expect(assets.isNifPath 'a.n\201f').toBe(false)
+    expect(assets.isNifPath 'x.k\198').toBe(false)
+  end)
 end)
 
 -- `correctTexturePath` (components/misc/resourcehelpers.cpp), case by case as jess-assets held it.
@@ -331,6 +361,35 @@ suite.describe('texture lookup', function()
       path = 'icons/coin.tga',
       found = true,
       tried = { 'icons/m/coin.tga', 'icons/coin.tga' },
+    }
+  end)
+
+  suite.it('takes the file name from after the last separator, which may leave none', function()
+    -- A path with no folder is its own file name, so it is tried once.
+    expect(assets.resourcePath({ 'icons' }, 'coin.tga', nil, among {})).toEqual {
+      path = 'icons/coin.tga',
+      found = false,
+      tried = { 'icons/coin.tga' },
+    }
+
+    -- Nothing follows a trailing separator, and the directory alone is tried for it.
+    expect(assets.resourcePath({ 'icons' }, 'a/b/', 'dds', among {})).toEqual {
+      path = 'icons/a/b/',
+      found = false,
+      tried = { 'icons/a/b/', 'icons/' },
+    }
+
+    expect(assets.resourcePath({ 'icons' }, 'Icons/M/', nil, among {})).toEqual {
+      path = 'icons/m/',
+      found = false,
+      tried = { 'icons/m/', 'icons/' },
+    }
+
+    -- A dot in a folder's name is no extension of the file's.
+    expect(assets.texturePath('a.b/c', among {})).toEqual {
+      path = 'textures/a.b/c',
+      found = false,
+      tried = { 'textures/a.b/c', 'textures/c' },
     }
   end)
 end)
@@ -838,6 +897,58 @@ suite.describe('check', function()
     expect(every.files[1].findings).toEqual {}
     expect(every.files[3].findings).toEqual {}
     expect(#assets.shown(report, 'info', false).files).toBe(2)
+  end)
+
+  suite.it('always shows a severity it doesn\'t know, and only those down to one it doesn\'t', function()
+    local function finding(severity: string, message: string): assets.FindingReport
+      return { severity = severity, code = 'madeUp', message = message }
+    end
+
+    local function file(path: string, findings: { assets.FindingReport }): assets.FileReport
+      return { path = path, source = 'memory', deeplyChecked = false, findings = findings, textures = {} }
+    end
+
+    -- A severity is known by the name a report spells it with: `wont_load` isn't one.
+    local report: assets.CheckReport = {
+      summary = {
+        texturesChecked = false,
+        loadOrderChecked = false,
+        files = 2,
+        deeplyChecked = 0,
+        wontLoad = 1,
+        byWorstSeverity = {},
+        byCode = {},
+      },
+      files = {
+        file('a.nif', {
+          finding('odd', 'one'),
+          finding('info', 'two'),
+          finding('wontLoad', 'three'),
+          finding('wont_load', 'four'),
+        }),
+        file('b.nif', { finding('performance', 'five') }),
+      },
+    }
+
+    local function messages(show: string): { { string } }
+      local kept = {}
+      for _, checked in assets.shown(report, show, false).files do
+        local found = { checked.path }
+        for _, entry in checked.findings do
+          table.insert(found, entry.message)
+        end
+
+        table.insert(kept, found)
+      end
+
+      return kept
+    end
+
+    expect(messages 'wontLoad').toEqual { { 'a.nif', 'one', 'three', 'four' } }
+    expect(messages 'performance').toEqual { { 'a.nif', 'one', 'three', 'four' }, { 'b.nif', 'five' } }
+    expect(messages 'info').toEqual { { 'a.nif', 'one', 'two', 'three', 'four' }, { 'b.nif', 'five' } }
+    expect(messages 'nonsense').toEqual { { 'a.nif', 'one', 'four' } }
+    expect(messages 'wont_load').toEqual { { 'a.nif', 'one', 'four' } }
   end)
 end)
 
