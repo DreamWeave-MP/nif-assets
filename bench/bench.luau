@@ -50,7 +50,19 @@ end
 local scratch: string?, filter: string?, binary: string?, packages: string? = ...
 if not scratch then error('nif-assets bench: a scratch folder is required', 0) end
 
-local only = if filter and filter ~= '' then filter else nil
+local Wanted = if filter and filter ~= '' then string.split(filter, '|') else nil
+
+--- Whether the workload called `name` runs: every one without a filter, else those whose name
+--- holds one of the filter's parts, which `|` separates.
+local function runs(name: string): boolean
+  if not Wanted then return true end
+
+  for _, part in Wanted do
+    if string.find(name, part, 1, true) then return true end
+  end
+
+  return false
+end
 
 --- Where this file is, from its chunk name: the suite's assets are beside its folder.
 local function here(): string
@@ -82,7 +94,7 @@ local function workload<Answer>(
   body: () -> Answer,
   weigh: (answer: Answer) -> number
 )
-  if only and not string.find(name, only, 1, true) then return end
+  if not runs(name) then return end
 
   local function verify()
     local weight = weigh(body())
@@ -626,7 +638,7 @@ workload(
 --- Times the command line run once on `argv`, a process a sample. What it prints must weigh
 --- `expected`, and it must exit with `status`.
 local function cold(name: string, expected: number, status: number, argv: { string })
-  if not binary or (only and not string.find(name, only, 1, true)) then return end
+  if not binary or not runs(name) then return end
 
   local arguments = {
     'run',
