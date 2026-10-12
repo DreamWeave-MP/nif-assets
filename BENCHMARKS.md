@@ -82,6 +82,24 @@ on the way to `help`, or to a check's or a dump's JSON and TOML, changed, so tho
 read generously; `dump all_types` and the check command do run code that changed, and may be
 what they say.
 
+The table was read again on review, by the same protocol: three rounds, base and head alternated
+under one lock, load average 1.6 to 2.8. The rows that moved came out the same within noise:
+`normalize` 1.59x, `isNifPath` 4.22x, `texturePath` 2.22x, `addBase` 1.88x, `addVfsTarget`
+1.10x, `shown` 8.02x and 6.29x, `dump random_objects` 1.10x, a dump as YAML 1.14x for
+`all_types` and 2.30x for `random_objects`, and the cold dump 1.57x. None of the rows at 1.05x to
+1.07x did: every one was within 5 percent the second time, `dump all_types` (511 against 514 µs)
+and the check command (30.1 against 29.5 ms) among them, so all of them are no change. Two rows
+crossed the line the other way and are noise as well: `check 67 models` read 1.07x, and the fix
+as JSON 0.95x with nothing on its path changed.
+
+Each commit's share was read again too, three rounds against the commit before it with the bench
+filtered to the row: the file name by `bytes.rfind` 1.67x on `texturePath`, and the extension and
+directory by their bytes 1.08x; `3258729` 0.72x on `normalize`, and `df93927` 2.18x over that,
+with 1.27x on `texturePath`; the sort 1.22x on `addBase`; numbers not spelled to be measured 1.73x
+on the YAML dump of `random_objects`, and the digits read off their places 1.24x more; the view
+loop 1.11x on `dump random_objects`. These are a second reading of the shares given below, not a
+correction of them: both are three rounds or fewer on a shared machine.
+
 What moved, and why. None of it is the dialect: a comprehension is the loop it replaces, and this
 package owns no buffer of numbers for l3i's data plane to take. It is two `@dream/bytes` calls,
 byte tests where strings were made to be compared, and work that was being done twice. Where a
