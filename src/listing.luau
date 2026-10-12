@@ -164,10 +164,7 @@ local function inline(value: Value): string
   end
 
   local map = value :: serialize.Map
-  local parts = table.create(#map.keys) :: { string }
-  for index, key in map.keys do
-    parts[index] = `{keyText(key)}: {inline(map.values[key])}`
-  end
+  local parts = [for key in map.keys => `{keyText(key)}: {inline(map.values[key])}`]
 
   return `\{{table.concat(parts, ', ')}}`
 end
