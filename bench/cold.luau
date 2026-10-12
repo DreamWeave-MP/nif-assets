@@ -1,0 +1,19 @@
+--!strict
+-- SPDX-License-Identifier: MIT OR Apache-2.0
+
+--[[
+One process of the bench's cold workloads: what the command line pays when it runs once, from its
+first `require` on, every module it needs compiling as it is loaded:
+
+  jess run --capability filesystem.read --package . --package-path .. bench/cold.luau <argv>...
+
+The arguments are `nif-assets`'s own. Prints what the command printed, then a line holding its
+exit status and the seconds it took, tab-separated. `bench.luau` runs it, seven processes a
+workload.
+]]
+
+local started = os.clock()
+local cli = require '@nif-assets/cli'
+local status = cli.run { ... }
+
+print(`\n{status}\t{string.format('%.9f', os.clock() - started)}`)

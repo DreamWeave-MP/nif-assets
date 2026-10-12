@@ -5,10 +5,12 @@
 --[[
 nif-assets, timed through its public modules: the path rules, a load order's models listed as
 targets, the check with its texture lookups, the report cut down to what is shown, info, dump,
-the dry run of the fixes, the argument list read, and every document the command line prints.
+the dry run of the fixes, the argument list read, and every document the command line prints;
+and the command line itself, run once.
 
-  jess run --capability filesystem.read --capability filesystem.write --package . \
-    --package-path .. bench/bench.luau <scratch> [filter]
+  jess run --capability filesystem.read --capability filesystem.write \
+    --capability process.spawn --package . --package-path .. \
+    bench/bench.luau <scratch> [filter] [jess binary] [package path]
 
 The models are the suite's two files (`all_types.nif`, every record type once, 16 KB;
 `random_objects.nif`, eight shapes, 233 KB), a Skyrim node spelled by hand, and 64 small ones
@@ -20,6 +22,11 @@ One line per workload, `name<TAB>seconds per call`: the median of seven batches 
 of a second each, with a full collection between batches. Every workload's answer is weighed
 before the first batch and after the last, outside the time, and compared with the one pinned
 here, so a path that stops doing its work fails instead of posting a time.
+
+Given the jess binary to start (and `process.spawn`), the cold workloads too: what one process
+pays for one command from its first `require` on, when compiling the modules it needs is most of
+the work. Each is the median of seven processes running `cold.luau`, which find the packages
+this one depends on in the package path, the folder above this package without one.
 ]]
 
 local assets = require '@nif-assets'
@@ -28,6 +35,7 @@ local cli = require '@nif-assets/cli'
 local commands = require '@nif-assets/commands'
 local fs = require '@dream/fs'
 local nif = require '@nif'
+local process = require '@dream/process'
 local vfs = require '@vfs'
 
 -- A build without the verified toolchain runs Luau slower than a release does, so a number from
@@ -39,7 +47,7 @@ if not jess.bench.verified then
   )
 end
 
-local scratch: string?, filter: string? = ...
+local scratch: string?, filter: string?, binary: string?, packages: string? = ...
 if not scratch then error('nif-assets bench: a scratch folder is required', 0) end
 
 local only = if filter and filter ~= '' then filter else nil
@@ -54,6 +62,7 @@ local function here(): string
 end
 
 local Here = here()
+local PackagePath = packages or `{Here}/../..`
 
 local function asset(name: string): string
   local path = `{Here}/../tests/assets/{name}`
@@ -612,6 +621,53 @@ workload(
     return cli.render(result, { format = 'yaml' })
   end,
   textWeight
+)
+
+--- Times the command line run once on `argv`, a process a sample. What it prints must weigh
+--- `expected`, and it must exit with `status`.
+local function cold(name: string, expected: number, status: number, argv: { string })
+  if not binary or (only and not string.find(name, only, 1, true)) then return end
+
+  local arguments = {
+    'run',
+    '--capability',
+    'filesystem.read',
+    '--package',
+    `{Here}/..`,
+    '--package-path',
+    PackagePath,
+    `{Here}/cold.luau`,
+  }
+
+  for _, argument in argv do
+    table.insert(arguments, argument)
+  end
+
+  local samples = {}
+  for run = 1, 7 do
+    local result, message = process.run(binary, arguments, { stdout = 'capture', stderr = 'null' })
+    if not result then error(`{name}: {message}`, 0) end
+
+    local printed = result.stdout or ''
+    local document, code, seconds = string.match(printed, '^(.*)\n(%d+)\t([%d.]+)\n$')
+    local weight = if document then textWeight(document) else -1
+    if tonumber(code) ~= status or weight ~= expected then
+      error(`{name}: exited {code} having printed {weight}, not {status} and {expected}`, 0)
+    end
+
+    samples[run] = tonumber(seconds) :: number
+  end
+
+  print(`{name}\t{string.format('%.9f', median(samples))}`)
+end
+
+cold('cold: help', 613667570714215, 0, { 'help' })
+cold('cold: check of 67 models', 46095758551344, 1, { 'check', DataRoot })
+cold(
+  'cold: dump of random_objects',
+  3008505421982011,
+  0,
+  { 'dump', `{DataRoot}/meshes/random_objects.nif` }
 )
 
 assert(fs.remove(DataRoot, { recursive = true }))
