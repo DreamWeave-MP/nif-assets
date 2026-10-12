@@ -118,10 +118,10 @@ end
 
 --- Replaces the extension of the last component, if it has one (`Normalized::changeExtension`).
 local function changeExtension(path: string, extension: string): string?
-  local stem = string.match(path, '^(.*)%.[^./]*$')
-  if not stem then return nil end
+  local dot = Bytes.rfind(path, '.')
+  if not dot or string.find(path, '/', dot + 2, true) then return nil end
 
-  return `{stem}.{extension}`
+  return `{string.sub(path, 1, dot)}.{extension}`
 end
 
 --- Where `directory` starts as a whole component of `path`, 1-based. Like OpenMW, the search
@@ -135,10 +135,7 @@ local function findDirectory(path: string, directory: string): number?
     local stop = position + #directory
     if stop > #path then return nil end
 
-    if
-      (position == 1 or string.sub(path, position - 1, position - 1) == '/')
-      and string.sub(path, stop, stop) == '/'
-    then
+    if (position == 1 or string.byte(path, position - 1) == 47) and string.byte(path, stop) == 47 then
       return position
     end
 
@@ -191,8 +188,10 @@ end
 
 --- `correctTexturePath`, for NIF textures and texture sets: under `textures` or `bookart`,
 --- preferring `.dds`.
+local TextureDirectories = table.freeze { 'textures', 'bookart' }
+
 local function texturePath(path: string, exists: (string) -> boolean): Resolved
-  return resourcePath({ 'textures', 'bookart' }, path, 'dds', exists)
+  return resourcePath(TextureDirectories, path, 'dds', exists)
 end
 
 --- A path's data folder and the path under it, when it's inside a `meshes` folder: the folder
