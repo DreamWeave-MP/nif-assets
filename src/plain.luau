@@ -52,7 +52,9 @@ local function plain(value: unknown, width: number?): unknown
       local elements = view:toTable()
       local list = table.create(#elements) :: { unknown }
       for index, element in elements do
-        list[index] = plain(element, each)
+        list[index] = if typeof(element) == 'vector'
+          then components(element :: vector, each)
+          else plain(element, each)
       end
 
       return list
