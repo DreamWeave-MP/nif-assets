@@ -20,6 +20,7 @@ its severities and codes in snake_case, as jess-nif did; they become camelCase h
 jess-assets' reports spelled them for Luau.
 ]]
 
+local Bytes = require '@dream/bytes'
 local Check = require '@nif/check'
 local Fix = require '@nif/fix'
 local Header = require '@nif/header'
@@ -93,7 +94,11 @@ local function isArchive(path: string): boolean
   return extension == 'bsa' or extension == 'ba2' or extension == 'zip' or extension == '7z'
 end
 
-local function fileName(path: string): string return string.match(path, '([^/]*)$') or path end
+--- What follows the last separator: the whole path without one, nothing after a trailing one.
+local function fileName(path: string): string
+  local slash = Bytes.rfind(path, '/')
+  return if slash then string.sub(path, slash + 2) else path
+end
 
 --- Replaces the extension of the last component, if it has one (`Normalized::changeExtension`).
 local function changeExtension(path: string, extension: string): string?
