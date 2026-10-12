@@ -127,6 +127,9 @@ end
 --- Where `directory` starts as a whole component of `path`, 1-based. Like OpenMW, the search
 --- gives up when a match runs to the end of the path.
 local function findDirectory(path: string, directory: string): number?
+  -- A name of nothing is no folder, and is found at every offset without the search moving on.
+  if directory == '' then return nil end
+
   local offset = 1
   while offset <= #path do
     local position = string.find(path, directory, offset, true)

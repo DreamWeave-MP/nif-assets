@@ -438,6 +438,16 @@ suite.describe('texture lookup', function()
       tried = { 'textures/' },
     }
   end)
+
+  suite.it('takes a directory with no name as no directory, where the search for it never ended', function()
+    local unnamed = assets.resourcePath({ '' }, 'a/b.tga', 'dds', among {})
+    expect(unnamed).toEqual(assets.resourcePath({}, 'a/b.tga', 'dds', among {}))
+    expect(unnamed.found).toBe(false)
+
+    -- One with a name after it is still looked for.
+    local named = assets.resourcePath({ '', 'icons' }, 'x/Icons/m/coin.tga', nil, among {})
+    expect(named.path).toBe 'icons/m/coin.tga'
+  end)
 end)
 
 suite.describe('sources', function()
