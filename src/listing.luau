@@ -167,19 +167,25 @@ local function isMultiline(value: Value): boolean
 end
 
 --- Whether a list goes on one line: scalars only, none with a line break, and either all
---- numbers or narrow enough.
+--- numbers or narrow enough. Numbers go on one line however wide, so only a list holding
+--- something else is spelled out to be measured.
 local function isInlineSequence(items: { Value }): boolean
-  local numbers, width = true, 0
+  local numbers = true
   for _, item in items do
     local kind = serialize.kindOf(item)
     if kind == 'array' or kind == 'map' or isMultiline(item) then return false end
 
     if kind ~= 'int' and kind ~= 'float' then numbers = false end
+  end
 
+  if numbers then return true end
+
+  local width = 0
+  for _, item in items do
     width += #inline(item) + 2
   end
 
-  return numbers or width <= MaxInlineWidth
+  return width <= MaxInlineWidth
 end
 
 --- Text with a line break in it as a literal block, CRLF read as LF. Text holding a control
