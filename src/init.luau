@@ -85,8 +85,19 @@ end
 
 --- Whether a VFS path is a NIF model or KF animation.
 local function isNifPath(path: string): boolean
-  local lower = string.lower(path)
-  return string.sub(lower, -4) == '.nif' or string.sub(lower, -3) == '.kf'
+  local length = #path
+  if length < 3 then return false end
+
+  -- An ASCII letter in either case, with bit 5 set, is the lowercase one, and no other byte is:
+  -- `f` is 102, `k` 107, `i` 105, `n` 110, and `.` 46.
+  local third, second, last = string.byte(path, length - 2, length)
+  if bit32.bor(last, 32) ~= 102 then return false end
+
+  if third == 46 then return bit32.bor(second, 32) == 107 end
+
+  return bit32.bor(second, 32) == 105
+    and bit32.bor(third, 32) == 110
+    and string.byte(path, length - 3) == 46
 end
 
 local function isArchive(path: string): boolean
