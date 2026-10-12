@@ -72,14 +72,15 @@ end
 
 table.freeze(ReportRanks)
 
---- OpenMW's VFS spelling: `\` becomes `/`, ASCII letters are lowercased, repeated separators
---- collapse, and a leading separator is dropped.
-local function normalize(path: string): string
-  local text = string.lower((string.gsub(path, '\\', '/')))
-  text = string.gsub(text, '/+', '/')
-  if string.sub(text, 1, 1) == '/' then text = string.sub(text, 2) end
+--- ASCII capitals and `\`, and what a VFS path spells them as.
+local Folded, Folds = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ\\', 'abcdefghijklmnopqrstuvwxyz/'
 
-  return text
+local Separators = table.freeze { collapse = '/', trimStart = '/' }
+
+--- OpenMW's VFS spelling: `\` becomes `/`, ASCII letters are lowercased, repeated separators
+--- collapse, and a leading separator is dropped. A path already spelled so is returned as it is.
+local function normalize(path: string): string
+  return Bytes.translate(path, Folded, Folds, Separators)
 end
 
 --- Whether a VFS path is a NIF model or KF animation.
