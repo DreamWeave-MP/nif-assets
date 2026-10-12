@@ -490,6 +490,32 @@ suite.describe('sources', function()
     expect(whole.inputs[1].name).toBe(data)
   end)
 
+  suite.it('read a folder\'s own models, not a neighbour\'s whose name starts with its name', function()
+    local root = tree('neighbours', {
+      ['data/Meshes/x/a.nif'] = 'a model',
+      ['data/Meshes/x0/a.nif'] = 'a model',
+      ['data/Meshes/xa.nif'] = 'a model',
+      ['data/Meshes/x.nif'] = 'a model',
+      ['data/Meshes_old/b.nif'] = 'a model',
+    })
+    local data = jess.fs.join(root, 'data')
+    local under = assets.sources(nil, nil, { jess.fs.join(data, 'Meshes/x') })
+    expect(under.targets).toEqual { { path = 'meshes/x/a.nif', source = data, layer = 1 } }
+
+    -- The same with the separator written after the folder.
+    local slashed = assets.sources(nil, nil, { `{jess.fs.join(data, 'Meshes/x')}/` })
+    expect(paths(slashed.targets)).toEqual { 'meshes/x/a.nif' }
+
+    -- `Meshes_old` is beside the meshes folder, not in it.
+    local meshes = assets.sources(nil, nil, { jess.fs.join(data, 'Meshes') })
+    expect(paths(meshes.targets)).toEqual {
+      'meshes/x.nif',
+      'meshes/x/a.nif',
+      'meshes/x0/a.nif',
+      'meshes/xa.nif',
+    }
+  end)
+
   suite.it('list a layer\'s models by the bytes of their paths, asking the caller which they are', function()
     local root = tree('order', {
       ['data/Meshes/x0/a.nif'] = 'a model',

@@ -358,6 +358,9 @@ local function add(sources: Sources, path: string, wanted: (string) -> boolean)
   if jess.fs.isDir(path) then
     layerRoot = root or path
     pushDirectory(sources, layerRoot)
+    -- What a folder holds is under its name and a separator: `meshes/x` is no part of
+    -- `meshes/x0/a.nif` or `meshes/xa.nif`.
+    if prefix ~= '' and string.byte(prefix, -1) ~= 47 then prefix ..= '/' end
   else
     local vfs = Vfs.VFS.new()
     if not vfs:pushArchive(path) then
