@@ -75,12 +75,17 @@ table.freeze(ReportRanks)
 --- ASCII capitals and `\`, and what a VFS path spells them as.
 local Folded, Folds = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ\\', 'abcdefghijklmnopqrstuvwxyz/'
 
-local Separators = table.freeze { collapse = '/', trimStart = '/' }
-
 --- OpenMW's VFS spelling: `\` becomes `/`, ASCII letters are lowercased, repeated separators
 --- collapse, and a leading separator is dropped. A path already spelled so is returned as it is.
 local function normalize(path: string): string
-  return Bytes.translate(path, Folded, Folds, Separators)
+  -- `bytes.translate` collapses and trims too, but reading those options costs each call more
+  -- than the two tests here, which most paths pass untouched.
+  local text = Bytes.translate(path, Folded, Folds)
+  if string.find(text, '//', 1, true) then text = string.gsub(text, '/+', '/') end
+
+  if string.byte(text, 1) == 47 then text = string.sub(text, 2) end
+
+  return text
 end
 
 --- Whether a VFS path is a NIF model or KF animation.
