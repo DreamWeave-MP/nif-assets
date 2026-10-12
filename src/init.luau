@@ -135,7 +135,10 @@ local function findDirectory(path: string, directory: string): number?
     local stop = position + #directory
     if stop > #path then return nil end
 
-    if (position == 1 or string.byte(path, position - 1) == 47) and string.byte(path, stop) == 47 then
+    if
+      (position == 1 or string.byte(path, position - 1) == 47)
+      and string.byte(path, stop) == 47
+    then
       return position
     end
 
@@ -186,10 +189,11 @@ local function resourcePath(
   return { path = preferred, found = false, tried = tried }
 end
 
---- `correctTexturePath`, for NIF textures and texture sets: under `textures` or `bookart`,
---- preferring `.dds`.
+--- Where a NIF's texture may already be: the first is where one that is in neither is put.
 local TextureDirectories = table.freeze { 'textures', 'bookart' }
 
+--- `correctTexturePath`, for NIF textures and texture sets: under `textures` or `bookart`,
+--- preferring `.dds`.
 local function texturePath(path: string, exists: (string) -> boolean): Resolved
   return resourcePath(TextureDirectories, path, 'dds', exists)
 end
