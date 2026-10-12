@@ -57,21 +57,20 @@ export type Sources = {
 --- Where a texture path led: the path OpenMW loads, whether it exists, and every path tried.
 export type Resolved = { path: string, found: boolean, tried: { string } }
 
-local Severities = table.freeze {
-  'wont_load',
-  'broken',
-  'missing_asset',
-  'collision',
-  'performance',
-  'info',
-}
-
 --- A code as jess spells codes in Luau: `missing_texture` is `missingTexture`.
 local function camel(code: string): string
   return (
     string.gsub(code, '_(%l)', function(letter: string): string return string.upper(letter) end)
   )
 end
+
+--- Each severity's rank by the name a report gives it: `wontLoad` is 1.
+local ReportRanks: { [string]: number } = {}
+for severity, rank in Ranks do
+  ReportRanks[camel(severity)] = rank
+end
+
+table.freeze(ReportRanks)
 
 --- OpenMW's VFS spelling: `\` becomes `/`, ASCII letters are lowercased, repeated separators
 --- collapse, and a leading separator is dropped.
@@ -599,15 +598,7 @@ end
 --- Whether a finding of `severity` (camelCase) is at least as severe as `show`; a severity jess
 --- doesn't know is always shown.
 local function shows(severity: string, show: string): boolean
-  local function rank(name: string): number
-    for position, known in Severities do
-      if camel(known) == name then return position end
-    end
-
-    return 0
-  end
-
-  return rank(severity) <= rank(show)
+  return (ReportRanks[severity] or 0) <= (ReportRanks[show] or 0)
 end
 
 --- The report down to `show`: findings less severe are left out, and so are files left without
