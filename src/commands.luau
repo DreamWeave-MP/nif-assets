@@ -164,20 +164,14 @@ end
 --- One NIF's records, down to the ones the request picks.
 local function dump(request: DumpRequest): DumpResult
   local sources, target = single('dump', request.input, request.data)
-  local dumped = assets.dump(sources, target, {
+  local {path, source, roots, records} = assets.dump(sources, target, {
     types = request.types,
     indices = request.indices,
     name = request.name,
     list = request.list,
   })
 
-  return {
-    command = 'dump',
-    path = dumped.path,
-    source = dumped.source,
-    roots = dumped.roots,
-    records = dumped.records,
-  }
+  return { command = 'dump', path = path, source = source, roots = roots, records = records }
 end
 
 --- Repairs what has one clear fix in every NIF the inputs hold, writing each fixed file over the

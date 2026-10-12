@@ -108,11 +108,11 @@ end
 
 type Texture = { path: string, resolved: string?, source: string? }
 
-local function texture(found: Texture): Value
+local function texture({path, resolved, source}: Texture): Value
   return serialize.struct {
-    { 'path', found.path },
-    { 'resolved', found.resolved },
-    { 'source', found.source },
+    { 'path', path },
+    { 'resolved', resolved },
+    { 'source', source },
   }
 end
 
@@ -143,12 +143,12 @@ local function check(result: commands.CheckResult): Value
           { 'worst', if file.worst then snake(file.worst) else nil },
           {
             'findings',
-            list(file.findings, function(finding): Value
+            list(file.findings, function({severity, code, message, record}): Value
               return serialize.struct {
-                { 'severity', snake(finding.severity) },
-                { 'code', snake(finding.code) },
-                { 'message', finding.message },
-                { 'record', finding.record },
+                { 'severity', snake(severity) },
+                { 'code', snake(code) },
+                { 'message', message },
+                { 'record', record },
               }
             end),
           },
@@ -329,17 +329,16 @@ local function fix(result: commands.FixResult): Value
   }
 end
 
-local function modify(result: commands.ModifyResult): Value
+local function modify({input, path, script, changed, dryRun, written}: commands.ModifyResult): Value
   local fields: { { unknown } } = {
-    { 'input', result.input },
-    { 'path', result.path },
-    { 'script', result.script },
-    { 'changed', result.changed },
+    { 'input', input },
+    { 'path', path },
+    { 'script', script },
+    { 'changed', changed },
   }
 
-  if result.dryRun then table.insert(fields, { 'dry_run', true }) end
+  if dryRun then table.insert(fields, { 'dry_run', true }) end
 
-  local written = result.written
   if written then
     local file: { { unknown } } = { { 'path', written.path } }
     if written.backup then table.insert(file, { 'backup', written.backup }) end

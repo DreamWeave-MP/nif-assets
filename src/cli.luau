@@ -262,9 +262,9 @@ local LevelNames =
 
 local FixNames = choice { 'rcn', 'ncc', 'markers', 'skin-weights', 'unreachable' }
 
-local function parseCheck(given: Given, format: Format): (Command?, string?)
-  local request: commands.CheckRequest = { inputs = given.positional, data = given.flags.data }
-  local show = given.flags.show
+local function parseCheck({flags, positional}: Given, format: Format): (Command?, string?)
+  local request: commands.CheckRequest = { inputs = positional, data = flags.data }
+  local show = flags.show
   if show then
     local level = Levels[show[1]]
     if not level then return nil, `--show takes {LevelNames}, not '{show[1]}'` end
@@ -273,32 +273,32 @@ local function parseCheck(given: Given, format: Format): (Command?, string?)
   end
 
   -- --verbose is every file and every finding, whatever --show says.
-  if given.flags.verbose then
+  if flags.verbose then
     request.show, request.everyFile = 'info', true
   end
 
   return { action = 'check' :: 'check', format = format, request = request }, nil
 end
 
-local function parseInfo(given: Given, format: Format): (Command?, string?)
-  local request: commands.InfoRequest = { inputs = given.positional, data = given.flags.data }
-  if given.flags.noTree then request.tree = false end
+local function parseInfo({flags, positional}: Given, format: Format): (Command?, string?)
+  local request: commands.InfoRequest = { inputs = positional, data = flags.data }
+  if flags.noTree then request.tree = false end
 
   return { action = 'info' :: 'info', format = format, request = request }, nil
 end
 
-local function parseDump(given: Given, format: Format): (Command?, string?)
-  if #given.positional > 1 then
-    return nil, `dump takes one NIF or KF file, not '{given.positional[2]}' as well`
+local function parseDump({flags, positional}: Given, format: Format): (Command?, string?)
+  if #positional > 1 then
+    return nil, `dump takes one NIF or KF file, not '{positional[2]}' as well`
   end
 
   local request: commands.DumpRequest = {
-    input = given.positional[1],
-    data = given.flags.data,
-    types = given.flags.types,
+    input = positional[1],
+    data = flags.data,
+    types = flags.types,
   }
 
-  local indices = given.flags.indices
+  local indices = flags.indices
   if indices then
     local list = table.create(#indices) :: { number }
     for position, text in indices do
@@ -312,17 +312,17 @@ local function parseDump(given: Given, format: Format): (Command?, string?)
     request.indices = list
   end
 
-  local name = given.flags.name
+  local name = flags.name
   if name then request.name = name[1] end
 
-  if given.flags.list then request.list = true end
+  if flags.list then request.list = true end
 
   return { action = 'dump' :: 'dump', format = format, request = request }, nil
 end
 
-local function parseFix(given: Given, format: Format): (Command?, string?)
-  local request: commands.FixRequest = { inputs = given.positional, data = given.flags.data }
-  local only = given.flags.only
+local function parseFix({flags, positional}: Given, format: Format): (Command?, string?)
+  local request: commands.FixRequest = { inputs = positional, data = flags.data }
+  local only = flags.only
   if only then
     local kinds: { Fix.Kind } = {}
     for _, value in only do
@@ -337,11 +337,11 @@ local function parseFix(given: Given, format: Format): (Command?, string?)
     request.only = kinds
   end
 
-  if given.flags.dryRun then request.dryRun = true end
+  if flags.dryRun then request.dryRun = true end
 
-  if given.flags.noBackup then request.backup = false end
+  if flags.noBackup then request.backup = false end
 
-  local output = given.flags.output
+  local output = flags.output
   if output then request.output = output[1] end
 
   return { action = 'fix' :: 'fix', format = format, request = request }, nil
