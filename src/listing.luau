@@ -43,17 +43,27 @@ local function narrowed(value: number): number
   return buffer.readf32(Scratch, 0)
 end
 
+--- The format that spells a number in each count of digits, one to seventeen: `%.0e` to `%.16e`.
+local Exponential = table.freeze([for precision in range(1, 17) => `%.{precision - 1}e`])
+
 --- The fewest decimal digits that read back as `value` (as a 32-bit float when `single`), and
 --- the decimal exponent of the first of them.
 local function shortestDigits(value: number, single: boolean): (string, number)
   for precision = 1, 17 do
-    local text = string.format(`%.{precision - 1}e`, value)
+    local text = string.format(Exponential[precision], value)
     local back = tonumber(text) :: number
     if (if single then narrowed(back) else back) ~= value then continue end
 
-    local mantissa, exponent = string.match(text, '^(%d[%.%d]*)e([%+%-]%d+)$')
-    local digits = string.gsub(string.gsub(mantissa :: string, '%.', ''), '0+$', '')
-    return if digits == '' then '0' else digits, tonumber(exponent) :: number
+    -- `d.ddde±xx`: a digit, a point when more digits follow, those digits, and the exponent
+    -- after the `e`.
+    local digits, mark = string.sub(text, 1, 1), 2
+    if precision > 1 then
+      digits, mark = digits .. string.sub(text, 3, precision + 1), precision + 2
+    end
+
+    if string.byte(digits, -1) == 48 then digits = string.gsub(digits, '0+$', '') end
+
+    return if digits == '' then '0' else digits, tonumber(string.sub(text, mark + 1)) :: number
   end
 
   return string.format('%.17g', value), 0
