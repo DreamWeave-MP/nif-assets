@@ -392,6 +392,52 @@ suite.describe('texture lookup', function()
       tried = { 'textures/a.b/c', 'textures/c' },
     }
   end)
+
+  suite.it('changes the extension after the file name\'s last dot, wherever in the name it is', function()
+    -- A dot that ends the name is an extension of nothing, and is still the one replaced.
+    expect(assets.texturePath('a/c.', among {})).toEqual {
+      path = 'textures/a/c.dds',
+      found = false,
+      tried = { 'textures/a/c.dds', 'textures/a/c.', 'textures/c.dds', 'textures/c.' },
+    }
+
+    -- A name that is all extension keeps nothing of itself.
+    expect(assets.texturePath('.hidden', among {})).toEqual {
+      path = 'textures/.dds',
+      found = false,
+      tried = { 'textures/.dds', 'textures/.hidden' },
+    }
+
+    expect(assets.texturePath('e.f.g', among {})).toEqual {
+      path = 'textures/e.f.dds',
+      found = false,
+      tried = { 'textures/e.f.dds', 'textures/e.f.g' },
+    }
+  end)
+
+  suite.it('knows a directory only as a whole folder of the path', function()
+    -- A folder whose name only ends or only starts with the directory's isn't it.
+    expect(assets.texturePath('atextures/x.tga', among {}).path).toBe 'textures/atextures/x.dds'
+    expect(assets.texturePath('texturesa/x.tga', among {}).path).toBe 'textures/texturesa/x.dds'
+
+    -- The search goes on past one that isn't, to the folder that is.
+    expect(assets.texturePath('mods/atextures/Textures/x.tga', among {})).toEqual {
+      path = 'textures/x.dds',
+      found = false,
+      tried = { 'textures/x.dds', 'textures/x.tga' },
+    }
+
+    -- The first directory is looked for through the whole path before the second is.
+    expect(assets.texturePath('bookart/textures/x.tga', among {}).path).toBe 'textures/x.dds'
+    expect(assets.texturePath('textures/bookart/x.tga', among {}).path).toBe 'textures/bookart/x.dds'
+
+    -- A directory that ends the path is one only with its separator after it.
+    expect(assets.texturePath('x/textures/', among {})).toEqual {
+      path = 'textures/',
+      found = false,
+      tried = { 'textures/' },
+    }
+  end)
 end)
 
 suite.describe('sources', function()
@@ -442,6 +488,84 @@ suite.describe('sources', function()
     local whole = assets.sources(nil, nil, { data })
     expect(#whole.targets).toBe(4)
     expect(whole.inputs[1].name).toBe(data)
+  end)
+
+  suite.it('list a layer\'s models by the bytes of their paths, asking the caller which they are', function()
+    local root = tree('order', {
+      ['data/Meshes/x0/a.nif'] = 'a model',
+      ['data/Meshes/x/a.nif'] = 'a model',
+      ['data/Meshes/x.nif'] = 'a model',
+      ['data/Meshes/x-.nif'] = 'a model',
+      ['data/Meshes/B.NIF'] = 'a model',
+      ['data/Meshes/a.kf'] = 'an animation',
+      ['data/Meshes/notes.txt'] = 'neither',
+      ['data/textures/tx_a.dds'] = 'a texture',
+    })
+    local data = jess.fs.join(root, 'data')
+    local ordered = {
+      'meshes/a.kf',
+      'meshes/b.nif',
+      'meshes/x-.nif',
+      'meshes/x.nif',
+      'meshes/x/a.nif',
+      'meshes/x0/a.nif',
+    }
+
+    -- `-` sorts before `.`, `.` before `/`, and `/` before `0`: a folder's models come between
+    -- those of its neighbours in name.
+    local made = assets.sources(nil, nil, { jess.fs.join(data, 'Meshes') })
+    expect(paths(made.targets)).toEqual(ordered)
+
+    for _, target in made.targets do
+      expect(target.source).toBe(data)
+      expect(target.layer).toBe(1)
+    end
+
+    -- The caller's rule is asked about every path under the folder, and nothing outside it.
+    local asked: { string } = {}
+    local picked = assets.new()
+    assets.add(picked, jess.fs.join(data, 'Meshes'), function(path: string): boolean
+      table.insert(asked, path)
+      return string.sub(path, -4) == '.txt' or string.sub(path, -3) == '.kf'
+    end)
+
+    table.sort(asked)
+    expect(asked).toEqual {
+      'meshes/a.kf',
+      'meshes/b.nif',
+      'meshes/notes.txt',
+      'meshes/x-.nif',
+      'meshes/x.nif',
+      'meshes/x/a.nif',
+      'meshes/x0/a.nif',
+    }
+
+    expect(picked.targets).toEqual {
+      { path = 'meshes/a.kf', source = data, layer = 1 },
+      { path = 'meshes/notes.txt', source = data, layer = 1 },
+    }
+    expect(picked.targeted).toEqual { ['meshes/a.kf'] = true, ['meshes/notes.txt'] = true }
+
+    -- A load order's are in the same order, each from the file it is.
+    local base = vfs.VFS.fromDirectories { data }
+    local whole = assets.sources(base)
+    expect(paths(whole.targets)).toEqual(ordered)
+    expect(whole.targets[2]).toEqual {
+      path = 'meshes/b.nif',
+      source = jess.fs.join(data, 'Meshes/B.NIF'),
+      layer = 0,
+    }
+
+    local chosen = assets.new(base)
+    assets.addBase(chosen, function(path: string): boolean return string.find(path, 'x', 1, true) ~= nil end)
+    expect(paths(chosen.targets)).toEqual {
+      'meshes/notes.txt',
+      'meshes/x-.nif',
+      'meshes/x.nif',
+      'meshes/x/a.nif',
+      'meshes/x0/a.nif',
+      'textures/tx_a.dds',
+    }
   end)
 
   suite.it('read the models an archive holds', function()
@@ -1297,6 +1421,26 @@ suite.describe('dump', function()
       alphaFormat = 'Default',
       isStatic = true,
     }
+  end)
+
+  suite.it('gives texture coordinates two numbers each, and positions three', function()
+    local file = nif.new()
+    local node = file:insert { type = 'NiNode', name = 'Root' }
+    file:shape {
+      name = 'Tri Shape',
+      vertices = Triangle,
+      triangles = { { 0, 1, 2 } },
+      uvs = { { 0, 0 }, { 1, 0.5 }, { 0.25, 1 } },
+      parent = node,
+    }
+    file.roots = { node }
+
+    local root = tree('dump-uvs', { ['mod/Meshes/uv.nif'] = file:save() })
+    local made = assets.sources(nil, nil, { jess.fs.join(root, 'mod/Meshes/uv.nif') })
+    local data = assets.dump(made, made.targets[1], { types = { 'NiTriShapeData' } }).records[1]
+    expect(data.uvSets).toEqual { { { 0, 0 }, { 1, 0.5 }, { 0.25, 1 } } }
+    expect(data.vertices).toEqual { { 0, 0, 0 }, { 1, 0, 0 }, { 0, 1, 0 } }
+    expect(data.normals).toEqual { { 0, 0, 1 }, { 0, 0, 1 }, { 0, 0, 1 } }
   end)
 
   suite.it('picks records by type, index, and name, and lists them', function()
