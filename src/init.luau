@@ -363,7 +363,7 @@ local function add(sources: Sources, path: string, wanted: (string) -> boolean)
     pushDirectory(sources, layerRoot)
     -- What a folder holds is under its name and a separator: `meshes/x` is no part of
     -- `meshes/x0/a.nif` or `meshes/xa.nif`.
-    if prefix ~= '' and string.byte(prefix, -1) ~= 47 then prefix ..= '/' end
+    if prefix ~= '' and string.byte(prefix, -1) ~= 47 then prefix = prefix .. '/' end
   else
     local vfs = Vfs.VFS.new()
     if not vfs:pushArchive(path) then
@@ -977,7 +977,7 @@ local function fixTarget(made: Sources, target: Target, options: FixOptions): Fi
 
   file.fixes = [
     for {fix, message, record} in fixed
-    => { fix = fix, message = message, record = record }
+    => { fix = fix :: string, message = message, record = record }
   ]
 
   if options.dryRun then return file end
