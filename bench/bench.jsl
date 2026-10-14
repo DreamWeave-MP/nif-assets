@@ -10,7 +10,7 @@ and the command line itself, run once.
 
   jess run --capability filesystem.read --capability filesystem.write \
     --capability process.spawn --package . --package-path .. \
-    bench/bench.luau <scratch> [filter] [jess binary] [package path]
+    bench/bench.jsl <scratch> [filter] [jess binary] [package path]
 
 The models are the suite's two files (`all_types.nif`, every record type once, 16 KB;
 `random_objects.nif`, eight shapes, 233 KB), a Skyrim node spelled by hand, and 64 small ones
@@ -25,7 +25,7 @@ here, so a path that stops doing its work fails instead of posting a time.
 
 Given the jess binary to start (and `process.spawn`), the cold workloads too: what one process
 pays for one command from its first `require` on, when compiling the modules it needs is most of
-the work. Each is the median of seven processes running `cold.luau`, which find the packages
+the work. Each is the median of seven processes running `cold.jsl`, which find the packages
 this one depends on in the package path, the folder above this package without one.
 ]]
 
@@ -567,7 +567,7 @@ local Arguments: { { string } } = {
   { 'check', '-v', '--format=toml', 'one.nif', 'two.nif', 'three.nif', 'four.kf', 'five.nif' },
   { 'help', 'dump' },
   { 'dump', '--index', 'seven', 'x.nif' },
-  { 'modify', '--script', 'edit.luau', 'x.nif' },
+  { 'modify', '--script', 'edit.jsl', 'x.nif' },
 }
 
 workload('parse 8 argument lists', 944, function(): number
@@ -648,7 +648,7 @@ local function cold(name: string, expected: number, status: number, argv: { stri
     `{Here}/..`,
     '--package-path',
     PackagePath,
-    `{Here}/cold.luau`,
+    `{Here}/cold.jsl`,
   }
 
   for _, argument in argv do

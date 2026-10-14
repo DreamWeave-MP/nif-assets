@@ -1,6 +1,6 @@
 # nif-assets benchmarks
 
-`bench/bench.luau` times the package through its public modules: the path rules (`normalize`,
+`bench/bench.jsl` times the package through its public modules: the path rules (`normalize`,
 `isNifPath`, `texturePath`), a load order's models listed as targets, the check with its texture
 lookups, the report cut down to what is shown, info, dump, the dry run of the fixes, the argument
 list read, and every document the command line prints, in each format. The models are the suite's
@@ -9,13 +9,13 @@ two files (`all_types.nif`, every record type once, 16 KB; `random_objects.nif`,
 to a data folder in scratch beside a folder of 4,096 empty files to list. A warm workload is
 warmed up, sized to a batch of about a tenth of a second, and reported as the median of seven
 batches with a full collection between them. A `cold:` workload is the median of seven fresh
-processes running `bench/cold.luau`, which is the command line run once, timed inside the script
+processes running `bench/cold.jsl`, which is the command line run once, timed inside the script
 from its first `require`: most of it is compiling the modules it loads. Every workload's answer
 is compared with one pinned in the file: a count, or the checksum and length of the document.
 
 ```sh
 jess run --capability filesystem.read --capability filesystem.write --capability process.spawn \
-  --package jpk/nif-assets --package-path jpk jpk/nif-assets/bench/bench.luau \
+  --package jpk/nif-assets --package-path jpk jpk/nif-assets/bench/bench.jsl \
   <scratch> [filter] [jess binary] [package path]
 ```
 

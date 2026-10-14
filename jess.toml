@@ -6,7 +6,7 @@ version = "0.1.0"
 jess_api = "1"
 default_target = "nif-assets"
 include = ["src"]
-tests = ["tests/run.luau", "tests/commands.luau", "tests/cli.luau", "tests/style.luau"]
+tests = ["tests/run.jsl", "tests/commands.jsl", "tests/cli.jsl", "tests/style.jsl"]
 
 [dependencies]
 "org.dreamweave.nif" = "0.1"
@@ -17,9 +17,9 @@ tests = ["tests/run.luau", "tests/commands.luau", "tests/cli.luau", "tests/style
 "org.dreamweave.dream-archive" = "0.1"
 
 [modules]
-"@nif-assets" = "src/init.luau"
-"@nif-assets/commands" = "src/commands.luau"
-"@nif-assets/cli" = "src/cli.luau"
+"@nif-assets" = "src/init.jsl"
+"@nif-assets/commands" = "src/commands.jsl"
+"@nif-assets/cli" = "src/cli.jsl"
 
 # Every module here is inert API: it does nothing until something requires it, and runs with the
 # authority of whatever calls it. The library's reports read data folders, archives, and NIFs, and
@@ -32,7 +32,7 @@ id = "nif-assets.core"
 requires = ["nif.core", "vfs.core"]
 exports = ["@nif-assets", "@nif-assets/commands", "@nif-assets/cli"]
 
-# The command line `jess nif` was: `src/main.luau` hands its arguments to `@nif-assets/cli`. A run
+# The command line `jess nif` was: `src/main.jsl` hands its arguments to `@nif-assets/cli`. A run
 # reads the inputs and the --data folders and archives: their listings, the NIFs, and whether each
 # texture a NIF names is there (filesystem.read). `fix` makes the folders a fixed file goes in,
 # copies the file it is about to write over to a backup, and writes the fixed file
@@ -42,5 +42,5 @@ exports = ["@nif-assets", "@nif-assets/commands", "@nif-assets/cli"]
 [targets.nif-assets]
 kind = "command"
 command = "nif-assets"
-entry = "src/main.luau"
+entry = "src/main.jsl"
 capabilities = ["filesystem.read", "filesystem.write"]

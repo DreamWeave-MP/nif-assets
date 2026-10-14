@@ -402,7 +402,7 @@ suite.describe('modify', function()
     local seen: { string } = {}
     local dry = commands.modify {
       input = file,
-      script = 'rename.luau',
+      script = 'rename.jsl',
       dryRun = true,
       edit = function(opened: nif.Nif, path: string)
         table.insert(seen, path)
@@ -414,7 +414,7 @@ suite.describe('modify', function()
       command = 'modify',
       input = file,
       path = file,
-      script = 'rename.luau',
+      script = 'rename.jsl',
       changed = true,
       dryRun = true,
     }

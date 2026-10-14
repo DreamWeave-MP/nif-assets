@@ -53,7 +53,7 @@ local Refused: { { argv: { string }, message: string } } = {
   { argv = { 'Check', 'a.nif' }, message = 'unknown command \'Check\'' },
   { argv = { '--bogus', 'check', 'a.nif' }, message = 'unknown option \'--bogus\'' },
   { argv = { '-v', 'check', 'a.nif' }, message = 'unknown option \'-v\'' },
-  { argv = { 'modify', '--script', 'edit.luau', 'a.nif' }, message = Modify },
+  { argv = { 'modify', '--script', 'edit.jsl', 'a.nif' }, message = Modify },
   { argv = { 'modify' }, message = Modify },
   {
     argv = { 'completions', 'bash' },

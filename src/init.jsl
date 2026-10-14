@@ -31,7 +31,7 @@ local Reader = require '@nif/gamebryo'
 local Vfs = require '@vfs'
 
 --- Each severity's rank, most severe first, by the name `@nif/check` gives it. This mirrors the
---- ranks private to `@nif`'s check (`src/internal/check/types.luau`), which nothing exports: they
+--- ranks private to `@nif`'s check (`src/internal/check/types.jsl`), which nothing exports: they
 --- are an order, not an object anything shares, and here they order a file's findings once its
 --- texture findings have joined the check's.
 local Ranks: { [string]: number } = table.freeze {

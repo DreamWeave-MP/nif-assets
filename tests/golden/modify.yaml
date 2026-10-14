@@ -1,6 +1,6 @@
 input: meshes/f/furn_de_firepit_01.nif
 path: meshes/f/furn_de_firepit_01.nif
-script: add-ncc.luau
+script: add-ncc.jsl
 changed: true
 written:
   path: mod/meshes/f/furn_de_firepit_01.nif
