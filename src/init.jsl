@@ -19,7 +19,8 @@ its severities and codes in snake_case, as jess-nif did; they become camelCase h
 jess-assets' reports spelled them for Luau.
 ]]
 
-local Bytes = require '@dream/bytes'
+local backup = require '@jess/backup'
+local bytes = require '@dream/bytes'
 local Check = require '@nif/check'
 local Fix = require '@nif/fix'
 local Header = require '@nif/header'
@@ -28,6 +29,9 @@ local Nif = require '@nif'
 local Plain = require '@self/plain'
 local Reader = require '@nif/gamebryo'
 local Vfs = require '@vfs'
+local fs = require '@dream/fs'
+
+type Regex = dream_bytes_Regex
 
 --- Each severity's rank, most severe first, by the name `@nif/check` gives it. This mirrors the
 --- ranks private to `@nif`'s check (`src/internal/check/types.jsl`), which nothing exports: they
@@ -72,15 +76,14 @@ end
 table.freeze(ReportRanks)
 
 --- ASCII capitals and `\`, and what a VFS path spells them as.
-local Folded, Folds = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ\\', 'abcdefghijklmnopqrstuvwxyz/'
+local Fold = bytes.rules { nocase = true, replace = { ['\\'] = '/' } }
 
 --- OpenMW's VFS spelling: `\` becomes `/`, ASCII letters are lowercased, repeated separators
 --- collapse, and a leading separator is dropped. A path already spelled so is returned as it is.
 @native
 local function normalize(path: string): string
-  -- `bytes.translate` collapses and trims too, but reading those options costs each call more
-  -- than the two tests here, which most paths pass untouched.
-  local text = Bytes.translate(path, Folded, Folds)
+  -- Repeated and leading separators are tested for here, and most paths have neither.
+  local text = bytes.translate(path, Fold)
   if string.find(text, '//', 1, true) then text = string.gsub(text, '/+', '/') end
 
   if string.byte(text, 1) == 47 then text = string.sub(text, 2) end
@@ -114,14 +117,14 @@ end
 --- What follows the last separator: the whole path without one, nothing after a trailing one.
 @native
 local function fileName(path: string): string
-  local slash = Bytes.rfind(path, '/')
+  local slash = bytes.rfind(path, '/')
   return if slash then string.sub(path, slash + 2) else path
 end
 
 --- Replaces the extension of the last component, if it has one (`Normalized::changeExtension`).
 @native
 local function changeExtension(path: string, extension: string): string?
-  local dot = Bytes.rfind(path, '.')
+  local dot = bytes.rfind(path, '.')
   if not dot or string.find(path, '/', dot + 2, true) then return nil end
 
   return `{string.sub(path, 1, dot)}.{extension}`
@@ -275,13 +278,13 @@ end
 
 --- Adds a data folder or archive to look textures up in, without reading the NIFs in it.
 local function addData(sources: Sources, root: string)
-  if not jess.fs.exists(root) then error(`'{root}' doesn't exist`, 0) end
+  if not fs.exists(root) then error(`'{root}' doesn't exist`, 0) end
 
   for _, input in sources.inputs do
     if input.name == root then return end
   end
 
-  if jess.fs.isDir(root) then
+  if fs.isDir(root) then
     pushDirectory(sources, root)
     return
   end
@@ -345,7 +348,7 @@ end
 
 --- Adds an input: a NIF file, a data folder, or an archive, or a VFS path the sources hold.
 local function add(sources: Sources, path: string, wanted: (string) -> boolean)
-  if not jess.fs.exists(path) then
+  if not fs.exists(path) then
     local vfsPath = normalize(path)
     if wanted(vfsPath) and addVfsTarget(sources, vfsPath) then return end
 
@@ -353,8 +356,8 @@ local function add(sources: Sources, path: string, wanted: (string) -> boolean)
   end
 
   local root, prefix = dataRoot(path)
-  if jess.fs.isFile(path) and not isArchive(path) then
-    local name = jess.fs.fileName(path) or ''
+  if fs.isFile(path) and not isArchive(path) then
+    local name = fs.fileName(path) or ''
     if not wanted(normalize(name)) then
       error(`'{path}' isn't a directory, NIF, KF, or archive`, 0)
     end
@@ -370,7 +373,7 @@ local function add(sources: Sources, path: string, wanted: (string) -> boolean)
   end
 
   local layerRoot
-  if jess.fs.isDir(path) then
+  if fs.isDir(path) then
     layerRoot = root or path
     pushDirectory(sources, layerRoot)
     -- What a folder holds is under its name and a separator: `meshes/x` is no part of
@@ -420,7 +423,7 @@ local function hasLookups(made: Sources): boolean return made.base ~= nil or #ma
 --- A target's bytes.
 local function readTarget(made: Sources, target: Target): buffer
   if target.layer == -1 then
-    local text = jess.fs.read(target.source)
+    local text = fs.readFileString(target.source)
     if not text then error(`{target.path}: file not found`, 0) end
 
     return buffer.fromstring(text)
@@ -884,8 +887,8 @@ local function dump(made: Sources, target: Target, options: DumpOptions?): Dump
   local settings: DumpOptions = options or {}
   local pattern: Regex? = nil
   if settings.name then
-    -- `jess.regex.new` throws for a pattern Rust's regex crate rejects, with its reason.
-    local compiled, regex = pcall(jess.regex.new, settings.name, { caseInsensitive = true })
+    -- `bytes.regex` throws for a pattern Rust's regex crate rejects, with its reason.
+    local compiled, regex = pcall(bytes.regex, settings.name, { caseInsensitive = true })
     if not compiled then error(`invalid name regex: {regex}`, 0) end
 
     pattern = regex
@@ -999,7 +1002,7 @@ local function fixTarget(made: Sources, target: Target, options: FixOptions): Fi
 
   local path
   if options.output then
-    path = jess.fs.join(options.output, target.path)
+    path = fs.join(options.output, target.path)
   else
     path = targetFile(made, target)
     if not path then
@@ -1009,10 +1012,10 @@ local function fixTarget(made: Sources, target: Target, options: FixOptions): Fi
   end
 
   local destination: string = path :: string
-  -- `jess.fs.write` throws when the file, or its backup, can't be written. The file is reported
+  -- `backup.write` throws when the file, or its backup, can't be written. The file is reported
   -- as skipped with the reason, and the rest are still fixed.
   local wrote, written = pcall(
-    function() return jess.fs.write(destination, nif:save(), { backup = options.backup ~= false }) end
+    function() return backup.write(destination, nif:save(), { backup = options.backup ~= false }) end
   )
   if wrote then
     file.written = written

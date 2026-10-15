@@ -78,7 +78,7 @@ local PackagePath = packages or `{Here}/../..`
 
 local function asset(name: string): string
   local path = `{Here}/../tests/assets/{name}`
-  return jess.fs.read(path) or error(`nif-assets bench: can't read {path}`, 0)
+  return fs.readFileString(path) or error(`nif-assets bench: can't read {path}`, 0)
 end
 
 local function median(samples: { number }): number
@@ -246,10 +246,14 @@ local ModelCount, KeyCount = 64, 4096
 
 --- A fresh folder `name` under the scratch root.
 local function folder(name: string): string
-  local root = jess.fs.join(scratch, name)
-  if jess.fs.exists(root) then assert(fs.remove(root, { recursive = true })) end
+  local root = fs.join(scratch, name)
+  if fs.exists(root) then
+    local done, problem = fs.remove(root, { recursive = true })
+    if not done then error(problem, 0) end
+  end
 
-  jess.fs.createDir(root)
+  local done, problem = fs.mkdir(root, { recursive = true })
+  if not done then error(problem, 0) end
   return root
 end
 
@@ -257,7 +261,8 @@ end
 local function dataFolder(): string
   local root = folder 'data'
   local function write(path: string, data: string | buffer)
-    jess.fs.write(jess.fs.join(root, path), data)
+    local done, problem = fs.writeFile(fs.join(root, path), data, { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
   end
 
   for index = 1, ModelCount do
@@ -297,7 +302,8 @@ local function keyFolder(): string
   for index = 1, KeyCount do
     local place = Folders[index % #Folders + 1]
     local extension = Extensions[index % #Extensions + 1]
-    jess.fs.write(jess.fs.join(root, `{place}/file_{index}.{extension}`), '')
+    local done, problem = fs.writeFile(fs.join(root, `{place}/file_{index}.{extension}`), '', { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
   end
 
   return root
@@ -682,6 +688,8 @@ cold(
   { 'dump', `{DataRoot}/meshes/random_objects.nif` }
 )
 
-assert(fs.remove(DataRoot, { recursive = true }))
-assert(fs.remove(KeyRoot, { recursive = true }))
+local done, problem = fs.remove(DataRoot, { recursive = true })
+if not done then error(problem, 0) end
+local done, problem = fs.remove(KeyRoot, { recursive = true })
+if not done then error(problem, 0) end
 

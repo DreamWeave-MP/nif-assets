@@ -27,6 +27,7 @@ input that isn't there, a dump of more than one file, a regex that doesn't compi
 local assets = require '@nif-assets'
 local Fix = require '@nif/fix'
 local Nif = require '@nif'
+local backup = require '@jess/backup'
 
 --- A severity as a report spells it, worst first.
 export type Level = 'wontLoad' | 'broken' | 'missingAsset' | 'collision' | 'performance' | 'info'
@@ -204,7 +205,7 @@ local function modify(request: ModifyRequest): ModifyResult
 
   local written
   if changed and not request.dryRun then
-    written = jess.fs.write(destination, saved, { backup = request.backup ~= false })
+    written = backup.write(destination, saved, { backup = request.backup ~= false })
   end
 
   return {

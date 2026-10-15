@@ -7,6 +7,7 @@
 -- the status and what the run left on disk.
 local cli = require '@nif-assets/cli'
 local commands = require '@nif-assets/commands'
+local fs = require '@dream/fs'
 local nif = require '@nif'
 local results = require './results'
 local support = require './support'
@@ -30,7 +31,7 @@ local Here = here()
 
 local function golden(name: string): string
   local path = `{Here}/golden/{name}`
-  return jess.fs.read(path) or error(`can't read {path}`, 0)
+  return fs.readFileString(path) or error(`can't read {path}`, 0)
 end
 
 local function parsed(argv: { string }): cli.Command
@@ -617,18 +618,19 @@ suite.describe('run', function()
   suite.it('checks a data folder: 1 when a model won\'t load, 0 when all of them do', function()
     local root = support.dataFolder(Suite, 'check')
     expect(cli.run { '--format', 'json', 'check', root }).toBe(1)
-    expect(cli.run { 'check', '--format', 'json', '--show', 'wont-load', jess.fs.join(root, 'meshes/rock.nif') }).toBe(
+    expect(cli.run { 'check', '--format', 'json', '--show', 'wont-load', fs.join(root, 'meshes/rock.nif') }).toBe(
       0
     )
 
     -- A finding that loads isn't a failure, and neither is asking for every file.
-    jess.fs.write(jess.fs.join(root, 'meshes/rug.nif'), support.rug())
-    expect(cli.run { 'check', '--format', 'json', '-v', jess.fs.join(root, 'meshes/rug.nif') }).toBe(0)
+    local done, problem = fs.writeFile(fs.join(root, 'meshes/rug.nif'), support.rug(), { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
+    expect(cli.run { 'check', '--format', 'json', '-v', fs.join(root, 'meshes/rug.nif') }).toBe(0)
   end)
 
   suite.it('describes and dumps, in each format', function()
     local root = support.dataFolder(Suite, 'info')
-    local rock = jess.fs.join(root, 'meshes/rock.nif')
+    local rock = fs.join(root, 'meshes/rock.nif')
     expect(cli.run { '--format', 'json', 'info', rock }).toBe(0)
     expect(cli.run { 'info', '--no-tree', '--format', 'toml', rock }).toBe(0)
     expect(cli.run { 'info', '--no-tree', '--data', root, 'meshes/rock.nif' }).toBe(0)
@@ -636,8 +638,10 @@ suite.describe('run', function()
     expect(cli.run { 'dump', '--format', 'json', '-t', 'ninode', '--index', '2', '--name', 'rock', rock }).toBe(0)
     expect(cli.run { 'dump', '--format', 'toml', '--type', 'NiNode', rock }).toBe(0)
 
-    local unrooted = jess.fs.join(root, 'meshes/unrooted.nif')
-    jess.fs.write(unrooted, support.unrooted())
+    local unrooted = fs.join(root, 'meshes/unrooted.nif')
+    local done, problem = fs.writeFile(unrooted, support.unrooted(), { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
+
     for _, format in { 'yaml', 'json', 'toml' } do
       expect({ format, cli.run { 'dump', '--format', format, unrooted } }).toEqual { format, 0 }
     end
@@ -645,46 +649,50 @@ suite.describe('run', function()
 
   suite.it('fixes one loose file in place after a backup, and into a folder', function()
     local root = support.dataFolder(Suite, 'fix')
-    local rug = jess.fs.join(root, 'meshes/rug.nif')
-    jess.fs.write(rug, support.rug())
-    local original = jess.fs.read(rug)
+    local rug = fs.join(root, 'meshes/rug.nif')
+    local done, problem = fs.writeFile(rug, support.rug(), { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
+    local original = fs.readFileString(rug)
 
     expect(cli.run { '--format', 'json', 'fix', '--only', 'ncc', '--dry-run', rug }).toBe(0)
-    expect(jess.fs.read(rug)).toBe(original)
-    expect(jess.fs.exists(rug .. '.bak')).toBe(false)
+    expect(fs.readFileString(rug)).toBe(original)
+    expect(fs.exists(rug .. '.bak')).toBe(false)
 
-    local folder = jess.fs.join(root, 'fixed')
-    local fixed = jess.fs.join(folder, 'meshes/rug.nif')
+    local folder = fs.join(root, 'fixed')
+    local fixed = fs.join(folder, 'meshes/rug.nif')
     expect(cli.run { '--format', 'json', 'fix', '--only', 'ncc', '--output', folder, rug }).toBe(0)
-    expect(jess.fs.read(rug)).toBe(original)
-    expect((nif.open(assert(jess.fs.readBuffer(fixed))):record(0) :: { [string]: unknown }).value).toBe 'NCC'
+    expect(fs.readFileString(rug)).toBe(original)
+    local fileBytes, problem = fs.readFile(fixed)
+    if not fileBytes then error(problem, 0) end
+    expect((nif.open(fileBytes):record(0) :: { [string]: unknown }).value).toBe 'NCC'
 
     -- Into the folder again backs up the earlier fix there, unless --no-backup.
     expect(cli.run { '--format', 'json', 'fix', '--output', folder, rug }).toBe(0)
-    expect(jess.fs.exists(fixed .. '.bak')).toBe(true)
+    expect(fs.exists(fixed .. '.bak')).toBe(true)
     expect(cli.run { '--format', 'json', 'fix', '--no-backup', '--output', folder, rug }).toBe(0)
-    expect(jess.fs.exists(fixed .. '.bak1')).toBe(false)
+    expect(fs.exists(fixed .. '.bak1')).toBe(false)
 
     expect(cli.run { '--format', 'json', 'fix', rug }).toBe(0)
-    expect(jess.fs.read(rug .. '.bak')).toBe(original)
-    expect(jess.fs.read(rug)).toBe(jess.fs.read(fixed))
+    expect(fs.readFileString(rug .. '.bak')).toBe(original)
+    expect(fs.readFileString(rug)).toBe(fs.readFileString(fixed))
 
     -- Nothing is left to fix, so nothing more is backed up.
     expect(cli.run { '--format', 'json', 'fix', rug }).toBe(0)
-    expect(jess.fs.exists(rug .. '.bak1')).toBe(false)
+    expect(fs.exists(rug .. '.bak1')).toBe(false)
   end)
 
   suite.it('is 9 when the run fails: an input or a data folder that isn\'t there', function()
     local root = support.dataFolder(Suite, 'failures')
-    local rock = jess.fs.join(root, 'meshes/rock.nif')
-    local missing = jess.fs.join(root, 'missing')
-    expect(cli.run { 'check', jess.fs.join(root, 'meshes/missing.nif') }).toBe(9)
+    local rock = fs.join(root, 'meshes/rock.nif')
+    local missing = fs.join(root, 'missing')
+    expect(cli.run { 'check', fs.join(root, 'meshes/missing.nif') }).toBe(9)
     expect(cli.run { 'fix', '--dry-run', '--data', missing, rock }).toBe(9)
     expect(cli.run { 'info', 'meshes/rock.nif' }).toBe(9)
 
     -- A folder with no model in it, a dump of two files, and a regex that doesn't compile.
-    jess.fs.createDir(jess.fs.join(root, 'empty'))
-    expect(cli.run { 'check', jess.fs.join(root, 'empty') }).toBe(9)
+    local done, problem = fs.mkdir(fs.join(root, 'empty'), { recursive = true })
+    if not done then error(problem, 0) end
+    expect(cli.run { 'check', fs.join(root, 'empty') }).toBe(9)
     expect(cli.run { 'dump', root }).toBe(9)
     expect(cli.run { 'dump', '--name', '(', rock }).toBe(9)
   end)

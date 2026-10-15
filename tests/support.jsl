@@ -3,6 +3,7 @@
 -- What the command suites share: the models jess's own `nif` harness built (a rock, a file whose
 -- only root is pixel data, a rug with a lowercase `ncc`, a textured shape), made with `@nif`, and
 -- the folders they go in under the scratch root.
+local fs = require '@dream/fs'
 local nif = require '@nif'
 
 local scratch = assert(rawget(_G, 'scratchRoot') :: string?, 'the suite needs a host-owned scratchRoot')
@@ -70,12 +71,15 @@ end
 --- A fresh folder `name` under the scratch root's `suite` folder, holding `files` by their paths
 --- below it.
 local function tree(suite: string, name: string, files: { [string]: string | buffer }): string
-  local root = jess.fs.join(scratch, suite, name)
-  if jess.fs.exists(root) then jess.fs.remove(root) end
+  local root = fs.join(scratch, suite, name)
+  if fs.exists(root) then fs.remove(root) end
 
-  jess.fs.createDir(root)
+  local done, problem = fs.mkdir(root, { recursive = true })
+  if not done then error(problem, 0) end
+
   for path, data in files do
-    jess.fs.write(jess.fs.join(root, path), data)
+    local done, problem = fs.writeFile(fs.join(root, path), data, { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
   end
 
   return root

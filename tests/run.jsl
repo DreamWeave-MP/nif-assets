@@ -7,6 +7,7 @@
 local archive = require '@dream-archive'
 local assets = require '@nif-assets'
 local check = require '@nif/check'
+local fs = require '@dream/fs'
 local nif = require '@nif'
 local test = require '@jess/test'
 local vfs = require '@vfs'
@@ -28,7 +29,7 @@ local Here = here()
 
 local function asset(name: string): string
   local path = `{Here}/assets/{name}`
-  return jess.fs.read(path) or error(`can't read {path}`, 0)
+  return fs.readFileString(path) or error(`can't read {path}`, 0)
 end
 
 local AllTypes, RandomObjects = asset 'all_types.nif', asset 'random_objects.nif'
@@ -125,12 +126,15 @@ local SkyrimFile = 'Gamebryo File Format, Version 20.2.0.7\n'
 
 --- A fresh folder under the scratch root holding `files` by their paths below it.
 local function tree(name: string, files: { [string]: string | buffer }): string
-  local root = jess.fs.join(scratch, 'nif-assets', name)
-  if jess.fs.exists(root) then jess.fs.remove(root) end
+  local root = fs.join(scratch, 'nif-assets', name)
+  if fs.exists(root) then fs.remove(root) end
 
-  jess.fs.createDir(root)
+  local done, problem = fs.mkdir(root, { recursive = true })
+  if not done then error(problem, 0) end
+
   for path, data in files do
-    jess.fs.write(jess.fs.join(root, path), data)
+    local done, problem = fs.writeFile(fs.join(root, path), data, { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
   end
 
   return root
@@ -453,15 +457,15 @@ end)
 suite.describe('sources', function()
   suite.it('bring a NIF\'s data folder along when it is in a meshes folder', function()
     local root = mod 'meshes-folder'
-    local file = jess.fs.join(root, 'mod/Meshes/x/shape.nif')
+    local file = fs.join(root, 'mod/Meshes/x/shape.nif')
     local made = assets.sources(nil, nil, { file })
     expect(made.targets).toEqual { { path = 'meshes/x/shape.nif', source = file, layer = 1 } }
     expect(#made.inputs).toBe(1)
-    expect(made.inputs[1].name).toBe(jess.fs.join(root, 'mod'))
+    expect(made.inputs[1].name).toBe(fs.join(root, 'mod'))
     expect(made.base).toBeNil()
 
     -- So the texture beside its meshes folder is found, and nothing else is read.
-    expect(assets.sourceOf(made, 'textures/tx_a.dds')).toBe(jess.fs.join(root, 'mod/textures/tx_a.dds'))
+    expect(assets.sourceOf(made, 'textures/tx_a.dds')).toBe(fs.join(root, 'mod/textures/tx_a.dds'))
     expect(assets.targetFile(made, made.targets[1])).toBe(file)
     expect(buffer.tostring(assets.readTarget(made, made.targets[1]))).toBe(
       buffer.tostring(shape 'textures\\tx_a.tga')
@@ -470,7 +474,7 @@ suite.describe('sources', function()
 
   suite.it('read a NIF outside any meshes folder alone, by its file name', function()
     local root = tree('lone', { ['Lone/Plain.NIF'] = shape 'tx_plain.bmp' })
-    local file = jess.fs.join(root, 'Lone/Plain.NIF')
+    local file = fs.join(root, 'Lone/Plain.NIF')
     local made = assets.sources(nil, nil, { file })
     expect(made.targets).toEqual { { path = 'plain.nif', source = file, layer = -1 } }
     expect(made.inputs).toEqual {}
@@ -480,8 +484,8 @@ suite.describe('sources', function()
 
   suite.it('read the models and animations under a folder, in path order', function()
     local root = mod 'folder'
-    local data = jess.fs.join(root, 'mod')
-    local everything = assets.sources(nil, nil, { jess.fs.join(data, 'Meshes') })
+    local data = fs.join(root, 'mod')
+    local everything = assets.sources(nil, nil, { fs.join(data, 'Meshes') })
     expect(everything.targets).toEqual {
       { path = 'meshes/x/defects.nif', source = data, layer = 1 },
       { path = 'meshes/x/junk.nif', source = data, layer = 1 },
@@ -490,7 +494,7 @@ suite.describe('sources', function()
     }
 
     -- Only what is under the folder given is read, though its whole data folder is searched.
-    local under = assets.sources(nil, nil, { jess.fs.join(data, 'Meshes/y') })
+    local under = assets.sources(nil, nil, { fs.join(data, 'Meshes/y') })
     expect(paths(under.targets)).toEqual { 'meshes/y/idle.kf' }
     expect(under.inputs[1].name).toBe(data)
 
@@ -508,16 +512,16 @@ suite.describe('sources', function()
       ['data/Meshes/x.nif'] = 'a model',
       ['data/Meshes_old/b.nif'] = 'a model',
     })
-    local data = jess.fs.join(root, 'data')
-    local under = assets.sources(nil, nil, { jess.fs.join(data, 'Meshes/x') })
+    local data = fs.join(root, 'data')
+    local under = assets.sources(nil, nil, { fs.join(data, 'Meshes/x') })
     expect(under.targets).toEqual { { path = 'meshes/x/a.nif', source = data, layer = 1 } }
 
     -- The same with the separator written after the folder.
-    local slashed = assets.sources(nil, nil, { `{jess.fs.join(data, 'Meshes/x')}/` })
+    local slashed = assets.sources(nil, nil, { `{fs.join(data, 'Meshes/x')}/` })
     expect(paths(slashed.targets)).toEqual { 'meshes/x/a.nif' }
 
     -- `Meshes_old` is beside the meshes folder, not in it.
-    local meshes = assets.sources(nil, nil, { jess.fs.join(data, 'Meshes') })
+    local meshes = assets.sources(nil, nil, { fs.join(data, 'Meshes') })
     expect(paths(meshes.targets)).toEqual {
       'meshes/x.nif',
       'meshes/x/a.nif',
@@ -537,7 +541,7 @@ suite.describe('sources', function()
       ['data/Meshes/notes.txt'] = 'neither',
       ['data/textures/tx_a.dds'] = 'a texture',
     })
-    local data = jess.fs.join(root, 'data')
+    local data = fs.join(root, 'data')
     local ordered = {
       'meshes/a.kf',
       'meshes/b.nif',
@@ -549,7 +553,7 @@ suite.describe('sources', function()
 
     -- `-` sorts before `.`, `.` before `/`, and `/` before `0`: a folder's models come between
     -- those of its neighbours in name.
-    local made = assets.sources(nil, nil, { jess.fs.join(data, 'Meshes') })
+    local made = assets.sources(nil, nil, { fs.join(data, 'Meshes') })
     expect(paths(made.targets)).toEqual(ordered)
 
     for _, target in made.targets do
@@ -560,7 +564,7 @@ suite.describe('sources', function()
     -- The caller's rule is asked about every path under the folder, and nothing outside it.
     local asked: { string } = {}
     local picked = assets.new()
-    assets.add(picked, jess.fs.join(data, 'Meshes'), function(path: string): boolean
+    assets.add(picked, fs.join(data, 'Meshes'), function(path: string): boolean
       table.insert(asked, path)
       return string.sub(path, -4) == '.txt' or string.sub(path, -3) == '.kf'
     end)
@@ -588,7 +592,7 @@ suite.describe('sources', function()
     expect(paths(whole.targets)).toEqual(ordered)
     expect(whole.targets[2]).toEqual {
       path = 'meshes/b.nif',
-      source = jess.fs.join(data, 'Meshes/B.NIF'),
+      source = fs.join(data, 'Meshes/B.NIF'),
       layer = 0,
     }
 
@@ -606,7 +610,7 @@ suite.describe('sources', function()
 
   suite.it('read the models an archive holds', function()
     local root = tree('archive', {})
-    local path = jess.fs.join(root, 'Pack.bsa')
+    local path = fs.join(root, 'Pack.bsa')
     pack(path, {
       ['meshes/a/packed.nif'] = shape 'tx_only.tga',
       ['textures/tx_only.dds'] = 'archived',
@@ -626,8 +630,8 @@ suite.describe('sources', function()
       ['data/meshes/b/loose.nif'] = shape(),
       ['data/textures/tx_a.dds'] = 'loose',
     })
-    local data = jess.fs.join(root, 'data')
-    pack(jess.fs.join(data, 'Pack.bsa'), {
+    local data = fs.join(root, 'data')
+    pack(fs.join(data, 'Pack.bsa'), {
       ['meshes/a/packed.nif'] = shape(),
       ['textures/tx_a.dds'] = 'archived',
     })
@@ -635,15 +639,15 @@ suite.describe('sources', function()
     local base = vfs.VFS.fromDirectories({ data }, { archives = { 'Pack.bsa' } })
     local made = assets.sources(base)
     expect(made.targets).toEqual {
-      { path = 'meshes/a/packed.nif', source = jess.fs.join(data, 'Pack.bsa'), layer = 0 },
-      { path = 'meshes/b/loose.nif', source = jess.fs.join(data, 'meshes/b/loose.nif'), layer = 0 },
+      { path = 'meshes/a/packed.nif', source = fs.join(data, 'Pack.bsa'), layer = 0 },
+      { path = 'meshes/b/loose.nif', source = fs.join(data, 'meshes/b/loose.nif'), layer = 0 },
     }
     expect(made.inputs).toEqual {}
 
     -- A loose file wins over the archive's copy of it.
-    expect(assets.sourceOf(made, 'textures/tx_a.dds')).toBe(jess.fs.join(data, 'textures/tx_a.dds'))
+    expect(assets.sourceOf(made, 'textures/tx_a.dds')).toBe(fs.join(data, 'textures/tx_a.dds'))
     expect(assets.targetFile(made, made.targets[1])).toBeNil()
-    expect(assets.targetFile(made, made.targets[2])).toBe(jess.fs.join(data, 'meshes/b/loose.nif'))
+    expect(assets.targetFile(made, made.targets[2])).toBe(fs.join(data, 'meshes/b/loose.nif'))
   end)
 
   suite.it('find a VFS path in the load order, and put inputs over it', function()
@@ -655,21 +659,21 @@ suite.describe('sources', function()
       ['first/textures/tx_first.dds'] = 'first',
       ['second/textures/tx_a.dds'] = 'second',
     })
-    local data = jess.fs.join(root, 'data')
+    local data = fs.join(root, 'data')
     local base = vfs.VFS.fromDirectories { data }
-    local first, second = jess.fs.join(root, 'first'), jess.fs.join(root, 'second')
+    local first, second = fs.join(root, 'first'), fs.join(root, 'second')
     local made = assets.sources(base, { first, second, first }, { 'Meshes\\B\\Loose.nif' })
     expect(made.targets).toEqual {
-      { path = 'meshes/b/loose.nif', source = jess.fs.join(data, 'meshes/b/loose.nif'), layer = 0 },
+      { path = 'meshes/b/loose.nif', source = fs.join(data, 'meshes/b/loose.nif'), layer = 0 },
     }
 
     -- Data folders are only searched, later ones first, and one given twice is there once.
     expect(#made.inputs).toBe(2)
-    expect(assets.sourceOf(made, 'textures/tx_a.dds')).toBe(jess.fs.join(second, 'textures/tx_a.dds'))
+    expect(assets.sourceOf(made, 'textures/tx_a.dds')).toBe(fs.join(second, 'textures/tx_a.dds'))
     expect(assets.sourceOf(made, 'textures/tx_first.dds')).toBe(
-      jess.fs.join(first, 'textures/tx_first.dds')
+      fs.join(first, 'textures/tx_first.dds')
     )
-    expect(assets.sourceOf(made, 'textures/tx_base.dds')).toBe(jess.fs.join(data, 'textures/tx_base.dds'))
+    expect(assets.sourceOf(made, 'textures/tx_base.dds')).toBe(fs.join(data, 'textures/tx_base.dds'))
     expect(assets.sourceOf(made, 'textures/tx_none.dds')).toBeNil()
 
     -- A path is a target once, and one nothing holds is not a target at all.
@@ -684,7 +688,7 @@ suite.describe('sources', function()
       ['data/meshes/b/other.nif'] = shape(),
       ['data/textures/tx_a.dds'] = 'loose',
     })
-    local data = jess.fs.join(root, 'data')
+    local data = fs.join(root, 'data')
     local made = assets.new(vfs.VFS.fromDirectories { data })
     expect(made.targets).toEqual {}
     expect(made.inputs).toEqual {}
@@ -695,7 +699,7 @@ suite.describe('sources', function()
     expect(report.summary.loadOrderChecked).toBe(true)
     expect(#report.files).toBe(1)
     expect(report.files[1].path).toBe 'meshes/b/loose.nif'
-    expect(report.files[1].source).toBe(jess.fs.join(data, 'meshes/b/loose.nif'))
+    expect(report.files[1].source).toBe(fs.join(data, 'meshes/b/loose.nif'))
     expect(report.files[1].textures[1].resolved).toBe 'textures/tx_a.dds'
 
     -- Without a load order there is nowhere to look a path up.
@@ -706,8 +710,8 @@ suite.describe('sources', function()
 
   suite.it('refuse what is not there and what is not a NIF', function()
     local root = mod 'refusals'
-    local notes = jess.fs.join(root, 'mod/Meshes/y/notes.txt')
-    local nowhere = jess.fs.join(root, 'nowhere.nif')
+    local notes = fs.join(root, 'mod/Meshes/y/notes.txt')
+    local nowhere = fs.join(root, 'nowhere.nif')
     expect(function() assets.sources(nil, nil, { notes }) end).toThrow(
       `'{notes}' isn't a directory, NIF, KF, or archive`
     )
@@ -718,8 +722,9 @@ suite.describe('sources', function()
     expect(function() assets.sources(nil, { nowhere }) end).toThrow(`'{nowhere}' doesn't exist`)
 
     -- A file named as an archive that isn't one.
-    local fake = jess.fs.join(root, 'Fake.bsa')
-    jess.fs.write(fake, 'not an archive')
+    local fake = fs.join(root, 'Fake.bsa')
+    local done, problem = fs.writeFile(fake, 'not an archive', { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
     expect(function() assets.sources(nil, nil, { fake }) end).toThrow(
       `'{fake}' isn't a directory, NIF, KF, or archive`
     )
@@ -729,8 +734,8 @@ end)
 suite.describe('check', function()
   suite.it('reports each model with its textures looked up in its own data folder', function()
     local root = mod 'check'
-    local data = jess.fs.join(root, 'mod')
-    local report = assets.check(assets.sources(nil, nil, { jess.fs.join(data, 'Meshes/x') }))
+    local data = fs.join(root, 'mod')
+    local report = assets.check(assets.sources(nil, nil, { fs.join(data, 'Meshes/x') }))
     expect(report).toEqual {
       summary = {
         texturesChecked = true,
@@ -779,7 +784,7 @@ suite.describe('check', function()
             {
               path = 'textures\\tx_a.tga',
               resolved = 'textures/tx_a.dds',
-              source = jess.fs.join(data, 'textures/tx_a.dds'),
+              source = fs.join(data, 'textures/tx_a.dds'),
             },
           },
           stats = ShapeStats,
@@ -795,8 +800,8 @@ suite.describe('check', function()
       ['data/textures/tx_both.dds'] = 'loose',
       ['data/textures/tx_plain.bmp'] = 'loose',
     })
-    local data = jess.fs.join(root, 'data')
-    local packed = jess.fs.join(data, 'Pack.bsa')
+    local data = fs.join(root, 'data')
+    local packed = fs.join(data, 'Pack.bsa')
     pack(packed, {
       ['meshes/packed.nif'] = shape 'tx_only.tga',
       ['textures/tx_both.dds'] = 'archived',
@@ -817,13 +822,13 @@ suite.describe('check', function()
 
     local loose, archived, plain = report.files[1], report.files[2], report.files[3]
     expect(loose.path).toBe 'meshes/loose.nif'
-    expect(loose.source).toBe(jess.fs.join(data, 'meshes/loose.nif'))
+    expect(loose.source).toBe(fs.join(data, 'meshes/loose.nif'))
     expect(loose.findings).toEqual {}
     expect(loose.textures).toEqual {
       {
         path = 'tx_both.tga',
         resolved = 'textures/tx_both.dds',
-        source = jess.fs.join(data, 'textures/tx_both.dds'),
+        source = fs.join(data, 'textures/tx_both.dds'),
       },
     }
 
@@ -847,14 +852,14 @@ suite.describe('check', function()
       {
         path = 'sub\\tx_plain.bmp',
         resolved = 'textures/tx_plain.bmp',
-        source = jess.fs.join(data, 'textures/tx_plain.bmp'),
+        source = fs.join(data, 'textures/tx_plain.bmp'),
       },
     }
   end)
 
   suite.it('lists a lone NIF\'s textures without looking them up', function()
     local root = tree('check-lone', { ['plain.nif'] = shape 'tx_plain.bmp' })
-    local file = jess.fs.join(root, 'plain.nif')
+    local file = fs.join(root, 'plain.nif')
     expect(assets.check(assets.sources(nil, nil, { file }))).toEqual {
       summary = {
         texturesChecked = false,
@@ -886,7 +891,7 @@ suite.describe('check', function()
       ['meshes/random_objects.nif'] = RandomObjects,
       ['meshes/skyrim.nif'] = SkyrimFile,
     })
-    local report = assets.check(assets.sources(nil, nil, { jess.fs.join(root, 'meshes') }))
+    local report = assets.check(assets.sources(nil, nil, { fs.join(root, 'meshes') }))
     expect(report.summary).toEqual {
       texturesChecked = true,
       loadOrderChecked = false,
@@ -933,7 +938,7 @@ suite.describe('check', function()
 
   suite.it('checks bytes it is handed against the sources', function()
     local root = mod 'check-bytes'
-    local made = assets.sources(nil, { jess.fs.join(root, 'mod') }, { jess.fs.join(root, 'mod/Meshes/y') })
+    local made = assets.sources(nil, { fs.join(root, 'mod') }, { fs.join(root, 'mod/Meshes/y') })
     local report = assets.checkBytes(made, 'meshes/new.nif', 'memory', shape 'tx_a.bmp')
     expect(report.path).toBe 'meshes/new.nif'
     expect(report.source).toBe 'memory'
@@ -942,7 +947,7 @@ suite.describe('check', function()
       {
         path = 'tx_a.bmp',
         resolved = 'textures/tx_a.dds',
-        source = jess.fs.join(root, 'mod/textures/tx_a.dds'),
+        source = fs.join(root, 'mod/textures/tx_a.dds'),
       },
     }
   end)
@@ -950,10 +955,10 @@ suite.describe('check', function()
   suite.it('says a model that has gone can\'t be read', function()
     local root = mod 'check-gone'
     local lone = tree('check-gone-lone', { ['plain.nif'] = shape() })
-    local folder = assets.sources(nil, nil, { jess.fs.join(root, 'mod/Meshes/y') })
-    local file = assets.sources(nil, nil, { jess.fs.join(lone, 'plain.nif') })
-    jess.fs.remove(jess.fs.join(root, 'mod/Meshes/y/idle.kf'))
-    jess.fs.remove(jess.fs.join(lone, 'plain.nif'))
+    local folder = assets.sources(nil, nil, { fs.join(root, 'mod/Meshes/y') })
+    local file = assets.sources(nil, nil, { fs.join(lone, 'plain.nif') })
+    fs.remove(fs.join(root, 'mod/Meshes/y/idle.kf'))
+    fs.remove(fs.join(lone, 'plain.nif'))
 
     local gone = assets.check(folder)
     expect(gone.summary.wontLoad).toBe(1)
@@ -961,7 +966,7 @@ suite.describe('check', function()
     expect(gone.files).toEqual {
       {
         path = 'meshes/y/idle.kf',
-        source = jess.fs.join(root, 'mod'),
+        source = fs.join(root, 'mod'),
         deeplyChecked = false,
         worst = 'wontLoad',
         findings = {
@@ -989,7 +994,7 @@ suite.describe('check', function()
   -- its data folder named.
   suite.it('gives jess.nif.check\'s pinned answers for a folder and for a file with its data', function()
     local root = tree('contract', { ['data/textures/tx_rock.dds'] = 'DDS ' })
-    local data = jess.fs.join(root, 'data')
+    local data = fs.join(root, 'data')
     local file = nif.new()
     local rock = file:insert { type = 'NiNode', name = 'Rock' }
     file.roots = { rock }
@@ -999,15 +1004,16 @@ suite.describe('check', function()
       triangles = { { 0, 1, 2 } },
       texture = 'tx_rock.tga',
     }
-    jess.fs.write(jess.fs.join(data, 'meshes/jess/rock.nif'), file:save())
+    local done, problem = fs.writeFile(fs.join(data, 'meshes/jess/rock.nif'), file:save(), { atomic = true, createParents = true })
+    if not done then error(problem, 0) end
 
     local texture = {
       path = 'tx_rock.tga',
       resolved = 'textures/tx_rock.dds',
-      source = jess.fs.join(data, 'textures/tx_rock.dds'),
+      source = fs.join(data, 'textures/tx_rock.dds'),
     }
 
-    expect(assets.check(assets.sources(nil, nil, { jess.fs.join(data, 'meshes') }))).toEqual {
+    expect(assets.check(assets.sources(nil, nil, { fs.join(data, 'meshes') }))).toEqual {
       summary = {
         texturesChecked = true,
         loadOrderChecked = false,
@@ -1032,13 +1038,13 @@ suite.describe('check', function()
     }
 
     local elsewhere =
-      assets.check(assets.sources(nil, { data }, { jess.fs.join(data, 'meshes/jess/rock.nif') }))
+      assets.check(assets.sources(nil, { data }, { fs.join(data, 'meshes/jess/rock.nif') }))
     expect(elsewhere.files[1].textures).toEqual { texture }
   end)
 
   suite.it('shows a report down to a severity, counting everything still', function()
     local root = mod 'shown'
-    local report = assets.check(assets.sources(nil, nil, { jess.fs.join(root, 'mod/Meshes/x') }))
+    local report = assets.check(assets.sources(nil, nil, { fs.join(root, 'mod/Meshes/x') }))
     local broken = assets.shown(report, 'broken', false)
     expect(broken.summary).toBe(report.summary)
     expect(paths(broken.files)).toEqual { 'meshes/x/defects.nif', 'meshes/x/junk.nif' }
@@ -1115,8 +1121,8 @@ end)
 suite.describe('info', function()
   suite.it('describes each model: header, records, collision, textures, and scene graph', function()
     local root = mod 'info'
-    local data = jess.fs.join(root, 'mod')
-    local reports = assets.info(assets.sources(nil, nil, { jess.fs.join(data, 'Meshes/x') }))
+    local data = fs.join(root, 'mod')
+    local reports = assets.info(assets.sources(nil, nil, { fs.join(data, 'Meshes/x') }))
     expect(#reports).toBe(3)
     expect(reports[1]).toEqual {
       path = 'meshes/x/defects.nif',
@@ -1182,7 +1188,7 @@ suite.describe('info', function()
       {
         path = 'textures\\tx_a.tga',
         resolved = 'textures/tx_a.dds',
-        source = jess.fs.join(data, 'textures/tx_a.dds'),
+        source = fs.join(data, 'textures/tx_a.dds'),
       },
     }
   end)
@@ -1244,9 +1250,9 @@ suite.describe('info', function()
 
   suite.it('says a model that has gone can\'t be read', function()
     local root = tree('info-gone', { ['plain.nif'] = shape() })
-    local file = jess.fs.join(root, 'plain.nif')
+    local file = fs.join(root, 'plain.nif')
     local made = assets.sources(nil, nil, { file })
-    jess.fs.remove(file)
+    fs.remove(file)
     expect(assets.info(made)).toEqual {
       {
         path = 'plain.nif',
@@ -1276,7 +1282,9 @@ local Fixes = {
 
 --- The codes the check finds in the model at `path`.
 local function codes(path: string): { string }
-  local report = check.check(path, assert(jess.fs.readBuffer(path)))
+  local fileBytes, problem = fs.readFile(path)
+  if not fileBytes then error(problem, 0) end
+  local report = check.check(path, fileBytes)
   local out = {}
   for _, finding in report.findings do
     table.insert(out, finding.code)
@@ -1288,10 +1296,10 @@ end
 suite.describe('fix', function()
   suite.it('reports what it would change without writing', function()
     local root = mod 'fix-dry'
-    local data = jess.fs.join(root, 'mod')
-    local file = jess.fs.join(data, 'Meshes/x/defects.nif')
-    local before = jess.fs.read(file)
-    local report = assets.fix(assets.sources(nil, nil, { jess.fs.join(data, 'Meshes') }), { dryRun = true })
+    local data = fs.join(root, 'mod')
+    local file = fs.join(data, 'Meshes/x/defects.nif')
+    local before = fs.readFileString(file)
+    local report = assets.fix(assets.sources(nil, nil, { fs.join(data, 'Meshes') }), { dryRun = true })
     expect(report).toEqual {
       summary = {
         files = 4,
@@ -1311,15 +1319,15 @@ suite.describe('fix', function()
         },
       },
     }
-    expect(jess.fs.read(file)).toBe(before)
-    expect(jess.fs.exists(file .. '.bak')).toBe(false)
+    expect(fs.readFileString(file)).toBe(before)
+    expect(fs.exists(file .. '.bak')).toBe(false)
   end)
 
   suite.it('writes over the file, backing it up first', function()
     local root = mod 'fix-backup'
-    local data = jess.fs.join(root, 'mod')
-    local file = jess.fs.join(data, 'Meshes/x/defects.nif')
-    local before = jess.fs.read(file)
+    local data = fs.join(root, 'mod')
+    local file = fs.join(data, 'Meshes/x/defects.nif')
+    local before = fs.readFileString(file)
     expect(codes(file)).toEqual { 'visible_editor_marker', 'lowercase_ncc' }
 
     local report = assets.fix(assets.sources(nil, nil, { file }))
@@ -1340,7 +1348,7 @@ suite.describe('fix', function()
         },
       },
     }
-    expect(jess.fs.read(file .. '.bak')).toBe(before)
+    expect(fs.readFileString(file .. '.bak')).toBe(before)
     expect(codes(file)).toEqual {}
 
     -- Fixed, there is nothing left to fix, and nothing is written again.
@@ -1351,16 +1359,16 @@ suite.describe('fix', function()
 
   suite.it('writes over the file without a backup when told to', function()
     local root = mod 'fix-plain'
-    local file = jess.fs.join(root, 'mod/Meshes/x/defects.nif')
+    local file = fs.join(root, 'mod/Meshes/x/defects.nif')
     local report = assets.fix(assets.sources(nil, nil, { file }), { backup = false })
     expect(report.files[1].written).toEqual { path = file }
-    expect(jess.fs.exists(file .. '.bak')).toBe(false)
+    expect(fs.exists(file .. '.bak')).toBe(false)
     expect(codes(file)).toEqual {}
   end)
 
   suite.it('makes only the fixes asked for', function()
     local root = mod 'fix-only'
-    local file = jess.fs.join(root, 'mod/Meshes/x/defects.nif')
+    local file = fs.join(root, 'mod/Meshes/x/defects.nif')
     local report = assets.fix(assets.sources(nil, nil, { file }), { only = { 'ncc' }, backup = false })
     expect(report.files[1].fixes).toEqual { Fixes[1] }
     expect(report.summary.byFix).toEqual { ncc = 1 }
@@ -1369,20 +1377,20 @@ suite.describe('fix', function()
 
   suite.it('writes into an output folder at the VFS path, leaving the original', function()
     local root = mod 'fix-output'
-    local data = jess.fs.join(root, 'mod')
-    local file = jess.fs.join(data, 'Meshes/x/defects.nif')
-    local before = jess.fs.read(file)
-    local output = jess.fs.join(root, 'fixed')
+    local data = fs.join(root, 'mod')
+    local file = fs.join(data, 'Meshes/x/defects.nif')
+    local before = fs.readFileString(file)
+    local output = fs.join(root, 'fixed')
     local report = assets.fix(assets.sources(nil, nil, { file }), { output = output })
-    local written = jess.fs.join(output, 'meshes/x/defects.nif')
+    local written = fs.join(output, 'meshes/x/defects.nif')
     expect(report.files[1].written).toEqual { path = written }
-    expect(jess.fs.read(file)).toBe(before)
+    expect(fs.readFileString(file)).toBe(before)
     expect(codes(written)).toEqual {}
   end)
 
   suite.it('skips a model in an archive unless it has somewhere to write it', function()
     local root = tree('fix-archive', {})
-    local path = jess.fs.join(root, 'Pack.bsa')
+    local path = fs.join(root, 'Pack.bsa')
     pack(path, { ['meshes/a/defects.nif'] = defects(), ['meshes/a/skyrim.nif'] = SkyrimFile })
 
     local report = assets.fix(assets.sources(nil, nil, { path }))
@@ -1405,9 +1413,9 @@ suite.describe('fix', function()
       },
     }
 
-    local output = jess.fs.join(root, 'fixed')
+    local output = fs.join(root, 'fixed')
     local extracted = assets.fix(assets.sources(nil, nil, { path }), { output = output })
-    local written = jess.fs.join(output, 'meshes/a/defects.nif')
+    local written = fs.join(output, 'meshes/a/defects.nif')
     expect(extracted.summary.written).toBe(1)
     expect(extracted.files[1].written).toEqual { path = written }
     expect(codes(written)).toEqual {}
@@ -1417,10 +1425,10 @@ end)
 suite.describe('dump', function()
   suite.it('gives a model\'s records as plain data, links as record indices', function()
     local root = mod 'dump'
-    local made = assets.sources(nil, nil, { jess.fs.join(root, 'mod/Meshes/x/shape.nif') })
+    local made = assets.sources(nil, nil, { fs.join(root, 'mod/Meshes/x/shape.nif') })
     local dumped = assets.dump(made, made.targets[1])
     expect(dumped.path).toBe 'meshes/x/shape.nif'
-    expect(dumped.source).toBe(jess.fs.join(root, 'mod/Meshes/x/shape.nif'))
+    expect(dumped.source).toBe(fs.join(root, 'mod/Meshes/x/shape.nif'))
     expect(dumped.roots).toEqual { 0 }
     expect(#dumped.records).toBe(5)
 
@@ -1472,7 +1480,7 @@ suite.describe('dump', function()
     file.roots = { node }
 
     local root = tree('dump-uvs', { ['mod/Meshes/uv.nif'] = file:save() })
-    local made = assets.sources(nil, nil, { jess.fs.join(root, 'mod/Meshes/uv.nif') })
+    local made = assets.sources(nil, nil, { fs.join(root, 'mod/Meshes/uv.nif') })
     local data = assets.dump(made, made.targets[1], { types = { 'NiTriShapeData' } }).records[1]
     expect(data.uvSets).toEqual { { { 0, 0 }, { 1, 0.5 }, { 0.25, 1 } } }
     expect(data.vertices).toEqual { { 0, 0, 0 }, { 1, 0, 0 }, { 0, 1, 0 } }
@@ -1481,7 +1489,7 @@ suite.describe('dump', function()
 
   suite.it('picks records by type, index, and name, and lists them', function()
     local root = mod 'dump-pick'
-    local made = assets.sources(nil, nil, { jess.fs.join(root, 'mod/Meshes/x/defects.nif') })
+    local made = assets.sources(nil, nil, { fs.join(root, 'mod/Meshes/x/defects.nif') })
     local target = made.targets[1]
     expect(assets.dump(made, target, { list = true }).records).toEqual {
       { index = 0, type = 'NiNode', name = 'Root' },
@@ -1523,7 +1531,7 @@ suite.describe('dump', function()
       ['meshes/all_types.nif'] = AllTypes,
       ['meshes/junk.nif'] = 'not a model',
     })
-    local made = assets.sources(nil, nil, { jess.fs.join(root, 'meshes') })
+    local made = assets.sources(nil, nil, { fs.join(root, 'meshes') })
     local byPath: { [string]: assets.Target } = {}
     for _, target in made.targets do
       byPath[target.path] = target
@@ -1549,7 +1557,7 @@ suite.describe('dump', function()
     expect(assets.dump(made, byPath['meshes/all_types.nif'], { indices = { 1 } }).records[1].type).toBe 'NiBltSource'
     expect(function() assets.dump(made, byPath['meshes/junk.nif']) end).toThrow 'meshes/junk.nif: truncated version line at offset 0'
 
-    jess.fs.remove(jess.fs.join(root, 'meshes/skyrim.nif'))
+    fs.remove(fs.join(root, 'meshes/skyrim.nif'))
     expect(function() assets.dump(made, byPath['meshes/skyrim.nif']) end).toThrow 'failed to read meshes/skyrim.nif: '
   end)
 end)
@@ -1557,7 +1565,7 @@ end)
 suite.describe('edit', function()
   suite.it('opens a Morrowind model to change, with the loose file it came from', function()
     local root = mod 'edit'
-    local file = jess.fs.join(root, 'mod/Meshes/x/shape.nif')
+    local file = fs.join(root, 'mod/Meshes/x/shape.nif')
     local made = assets.sources(nil, nil, { file })
     local editable = assets.edit(made, made.targets[1])
     expect(editable.path).toBe 'meshes/x/shape.nif'
@@ -1569,7 +1577,7 @@ suite.describe('edit', function()
 
   suite.it('has no file for a model in an archive, and refuses another game\'s', function()
     local root = tree('edit-archive', { ['meshes/skyrim.nif'] = SkyrimFile, ['meshes/junk.nif'] = 'not a model' })
-    local path = jess.fs.join(root, 'Pack.bsa')
+    local path = fs.join(root, 'Pack.bsa')
     pack(path, { ['meshes/a/packed.nif'] = shape() })
 
     local packed = assets.sources(nil, nil, { path })
@@ -1578,7 +1586,7 @@ suite.describe('edit', function()
     expect(editable.file).toBeNil()
     expect(editable.nif:reachableCount()).toBe(3)
 
-    local made = assets.sources(nil, nil, { jess.fs.join(root, 'meshes') })
+    local made = assets.sources(nil, nil, { fs.join(root, 'meshes') })
     expect(function() assets.edit(made, made.targets[2]) end).toThrow 'meshes/skyrim.nif is a Skyrim 20.2.0.7 NIF; jess only edits Morrowind (4.0.0.2) NIFs so far'
     expect(function() assets.edit(made, made.targets[1]) end).toThrow 'meshes/junk.nif: truncated version line at offset 0'
   end)
