@@ -146,3 +146,80 @@ Tried against head, three rounds each, and not kept, because none reached 5 perc
 record's lists with numbers passed straight through (JSON, TOML, and YAML dump); remembering each
 code's camelCase spelling (check, info); one VFS lookup for a texture that is found where there
 are two (check); and the view loop above as a comprehension (dump).
+
+## Which modules are native, and why
+
+Jess compiles to machine code only what is marked (`--!native` on a module, `@native` on one
+function), and every load pays for what is marked. A module carries `--!native` when a row below
+spends its time there and the module is small (12 KB or less); a larger module carries `@native`
+on the functions the row spends its time in, and nothing else.
+
+Measured 2026-10-15 with `jess 0.1.0`, the verified release build of jess `07c38cb` on l3i
+2.0.3, on the i7-10870H, the one-minute load 1.46 and 1.44 at the start of the two
+sessions. In each session the bench ran alternately on this package and on a copy of it with
+every module marked, three fresh runs of `bench/bench.jsl` each, every run's row the median of
+its batches; a column is the median of the three, and a ratio is against the all-marked runs of
+the same session. Which functions a row spends its time in comes from `jess run --profile` of
+that row alone, unmarked. The load cost is a fresh `jess run --package <this package>
+--package-path jpk` of a script that only requires `@nif-assets`, the two sides alternating, the
+median of five each after one warm-up.
+
+| Requiring `@nif-assets` | All marked | This state |
+| --- | ---: | ---: |
+| Unmarked | 0.197 s | 0.189 s |
+| Final | 0.201 s | 0.187 s |
+
+| Row | All marked (ms) | Unmarked / all marked | Final (ms) | Final / all marked |
+| --- | ---: | ---: | ---: | ---: |
+| normalize 256 written paths | 0.08701 | **1.375×** | 0.08209 | 0.943× |
+| isNifPath over 4,096 keys | 0.1842 | **2.169×** | 0.1717 | 0.932× |
+| texturePath for 256 written paths | 0.5279 | **1.503×** | 0.4960 | 0.940× |
+| new + addBase over 4,096 keys | 1.579 | **1.390×** | 1.516 | 0.960× |
+| new + addVfsTarget for 64 models | 0.1406 | **1.177×** | 0.1381 | 0.982× |
+| check 67 models in a data folder | 6.029 | **1.056×** | 6.011 | 0.997× |
+| checkBytes random_objects | 0.1222 | 1.048× | 0.1238 | 1.014× |
+| shown: 2,680 files down to collision | 0.8005 | **1.371×** | 0.7800 | 0.974× |
+| shown: 2,680 files, every file and finding | 1.200 | **1.197×** | 1.187 | 0.988× |
+| infoBytes all_types | 0.01428 | **1.129×** | 0.01493 | 1.046× |
+| infoBytes random_objects | 0.1836 | 1.043× | 0.1912 | 1.041× |
+| info for 67 models in a data folder | 7.590 | **1.087×** | 7.899 | 1.041× |
+| dump all_types | 0.5387 | **1.311×** | 0.5609 | 1.041× |
+| dump random_objects | 2.500 | **1.509×** | 2.441 | 0.976× |
+| dump random_objects, listed | 0.1321 | **1.057×** | 0.1342 | 1.016× |
+| dump all_types, shapes named tri | 0.1440 | 1.021× | 0.1467 | 1.019× |
+| dump a Skyrim node | 0.03460 | 0.998× | 0.03564 | 1.030× |
+| fix 67 models, dry run | 4.089 | 1.010× | 4.301 | **1.052×** |
+| parse 8 argument lists | 0.01938 | **1.479×** | 0.02607 | **1.345×** |
+| render check of 67 models as yaml | 21.71 | 1.033× | 21.45 | 0.988× |
+| render check of 67 models as json | 2.486 | 1.002× | 2.572 | 1.034× |
+| render check of 67 models as toml | 3.920 | 0.752× | 4.035 | 1.029× |
+| render info of 67 models as yaml | 32.68 | **1.059×** | 34.36 | **1.051×** |
+| render info of 67 models as json | 4.436 | 0.871× | 4.381 | 0.988× |
+| render info of 67 models as toml | 6.750 | 1.017× | 6.497 | 0.963× |
+| render fix of 67 models as yaml | 2.831 | 1.014× | 2.960 | 1.046× |
+| render fix of 67 models as json | 0.3650 | 0.998× | 0.3784 | 1.037× |
+| render fix of 67 models as toml | 0.5985 | 0.910× | 0.6189 | 1.034× |
+| render dump of all_types as yaml | 4.880 | **1.193×** | 5.248 | **1.075×** |
+| render dump of all_types as json | 3.368 | **1.079×** | 3.501 | 1.040× |
+| render dump of all_types as toml | 4.372 | **1.158×** | 4.425 | 1.012× |
+| render dump of random_objects as yaml | 215.1 | **1.363×** | 206.3 | 0.959× |
+| render dump of random_objects as json | 90.02 | 1.047× | 88.91 | 0.988× |
+| render dump of random_objects as toml | 98.27 | **1.057×** | 99.76 | 1.015× |
+| check command: sources, check, shown, YAML | 31.45 | **1.052×** | 31.48 | 1.001× |
+
+What carries the directive (every module and function here is one a row spends its time in,
+unmarked):
+
+- Whole: `listing`, `plain`.
+- `init`, by function: a closure at line 62, `normalize`, `isNifPath`, `fileName`,
+  `changeExtension`, `findDirectory`, `resourcePath`, `texturePath`, `extendTargets`, `get`,
+  `sourceName`, `sourceOf`, `addVfsTarget`, `keysOf`, `fileReport`, `shown`, `dump`.
+- `render`, by function: `snake`, a closure at line 34, `list`, `plainValue`, a closure at line 380.
+- Unmarked: `cli`, `commands`, `main`, `usage`.
+
+`cli` and `main` parse a command line once a run and are never marked, so `parse 8 argument
+lists` (1.35x, of a 19 µs call) is slower than all marked by rule. The three other rows above 5%
+(a dry-run fix of 67 models, 1.052x; rendering their info as YAML, 1.051x; rendering a dump of
+`all_types` as YAML, 1.075x) are inside this protocol's noise: two all-marked copies of
+dream-archive, measured the same way, put 10 of 109 rows more than 5% apart, the 95th
+percentile at 1.074x.
