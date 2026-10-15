@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 -- What `nif-assets --help` and `nif-assets <command> --help` print: the summaries and argument
 -- descriptions `jess nif` had, under this command's name.

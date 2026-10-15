@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 
 --[[
@@ -60,7 +59,7 @@ export type Resolved = { path: string, found: boolean, tried: { string } }
 --- A code as jess spells codes in Luau: `missing_texture` is `missingTexture`.
 local function camel(code: string): string
   return (
-    string.gsub(code, '_(%l)', function(letter: string): string return string.upper(letter) end)
+    string.gsub(code, '_(%l)', @native function(letter: string): string return string.upper(letter) end)
   )
 end
 
@@ -77,6 +76,7 @@ local Folded, Folds = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ\\', 'abcdefghijklmnopqrstuvwxy
 
 --- OpenMW's VFS spelling: `\` becomes `/`, ASCII letters are lowercased, repeated separators
 --- collapse, and a leading separator is dropped. A path already spelled so is returned as it is.
+@native
 local function normalize(path: string): string
   -- `bytes.translate` collapses and trims too, but reading those options costs each call more
   -- than the two tests here, which most paths pass untouched.
@@ -89,6 +89,7 @@ local function normalize(path: string): string
 end
 
 --- Whether a VFS path is a NIF model or KF animation.
+@native
 local function isNifPath(path: string): boolean
   local length = #path
   if length < 3 then return false end
@@ -111,12 +112,14 @@ local function isArchive(path: string): boolean
 end
 
 --- What follows the last separator: the whole path without one, nothing after a trailing one.
+@native
 local function fileName(path: string): string
   local slash = Bytes.rfind(path, '/')
   return if slash then string.sub(path, slash + 2) else path
 end
 
 --- Replaces the extension of the last component, if it has one (`Normalized::changeExtension`).
+@native
 local function changeExtension(path: string, extension: string): string?
   local dot = Bytes.rfind(path, '.')
   if not dot or string.find(path, '/', dot + 2, true) then return nil end
@@ -126,6 +129,7 @@ end
 
 --- Where `directory` starts as a whole component of `path`, 1-based. Like OpenMW, the search
 --- gives up when a match runs to the end of the path.
+@native
 local function findDirectory(path: string, directory: string): number?
   -- A name of nothing is no folder, and is found at every offset without the search moving on.
   if directory == '' then return nil end
@@ -154,6 +158,7 @@ end
 --- `correctResourcePath`: anything before the first of `directories` found in the path is
 --- stripped (or the first one is prefixed), `extension` is preferred, and then the original
 --- extension and the file name directly under the first directory are tried.
+@native
 local function resourcePath(
   directories: { string },
   path: string,
@@ -197,6 +202,7 @@ local TextureDirectories = table.freeze { 'textures', 'bookart' }
 
 --- `correctTexturePath`, for NIF textures and texture sets: under `textures` or `bookart`,
 --- preferring `.dds`.
+@native
 local function texturePath(path: string, exists: (string) -> boolean): Resolved
   return resourcePath(TextureDirectories, path, 'dds', exists)
 end
@@ -227,6 +233,7 @@ local function newSources(base: Vfs.VFS?): Sources
   return { inputs = {}, base = base, targets = {}, targeted = {} }
 end
 
+@native
 local function extendTargets(sources: Sources, targets: { Target })
   for _, target in targets do
     sources.targeted[target.path] = true
@@ -244,6 +251,7 @@ local function pushDirectory(sources: Sources, root: string)
 end
 
 --- The winning file for a VFS path: the newest input first, then the load order.
+@native
 local function get(sources: Sources, path: string): Vfs.VfsFile?
   for index = #sources.inputs, 1, -1 do
     local file = sources.inputs[index].vfs:getFile(path)
@@ -253,11 +261,13 @@ local function get(sources: Sources, path: string): Vfs.VfsFile?
   return if sources.base then sources.base:getFile(path) else nil
 end
 
+@native
 local function sourceName(file: Vfs.VfsFile): string
   return file:parentArchivePath() or file:path()
 end
 
 --- The data folder or archive a VFS path comes from.
+@native
 local function sourceOf(sources: Sources, path: string): string?
   local file = get(sources, path)
   return if file then sourceName(file) else nil
@@ -285,6 +295,7 @@ local function addData(sources: Sources, root: string)
 end
 
 --- Adds a NIF path the inputs or the load order hold as a target; whether one does.
+@native
 local function addVfsTarget(sources: Sources, path: string): boolean
   path = normalize(path)
   if sources.targeted[path] then return true end
@@ -306,6 +317,7 @@ local function addVfsTarget(sources: Sources, path: string): boolean
 end
 
 --- Every key of `vfs` that `wanted` takes and starts with `prefix`, as targets of `layer`.
+@native
 local function keysOf(
   vfs: Vfs.VFS,
   prefix: string,
@@ -449,6 +461,7 @@ export type FileReport = {
 }
 
 --- One NIF's check, as a report: findings, and textures resolved against `made` when `lookups`.
+@native
 local function fileReport(
   made: Sources,
   path: string,
@@ -628,6 +641,7 @@ end
 
 --- The report down to `show`: findings less severe are left out, and so are files left without
 --- any, unless `everyFile`. The summary still counts everything.
+@native
 local function shown(report: CheckReport, show: string, everyFile: boolean): CheckReport
   local files = {}
   for _, file in report.files do
@@ -865,6 +879,7 @@ end
 
 --- A target's records, read by the reader for its version: the editable model for Morrowind's,
 --- `@nif/gamebryo` for every other version OpenMW reads.
+@native
 local function dump(made: Sources, target: Target, options: DumpOptions?): Dump
   local settings: DumpOptions = options or {}
   local pattern: Regex? = nil

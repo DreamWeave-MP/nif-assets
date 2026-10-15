@@ -1,5 +1,4 @@
 --!strict
---!native
 -- SPDX-License-Identifier: MIT OR Apache-2.0
 
 --[[
@@ -27,15 +26,17 @@ type Value = serialize.Value
 export type Format = 'yaml' | 'json' | 'toml'
 
 --- `camelCase` as `camel_case`: jess's `symbol::snake_case`, which leaves a leading capital be.
+@native
 local function snake(name: string): string
   local rest = string.gsub(
     string.sub(name, 2),
     '%u',
-    function(letter: string): string return `_{string.lower(letter)}` end
+    @native function(letter: string): string return `_{string.lower(letter)}` end
   )
   return string.sub(name, 1, 1) .. rest
 end
 
+@native
 local function list<Item>(items: { Item }, each: (Item) -> Value): Value
   local out = table.create(#items) :: { Value }
   for index, entry in items do
@@ -361,6 +362,7 @@ local Leading = table.freeze { 'index', 'type', 'name' }
 
 --- A record's plain data as a value: a list as an array, and a table by field name as a map of
 --- its fields in snake_case, the leading ones first when `record`, the rest by name.
+@native
 local function plainValue(plain: unknown, record: boolean): Value
   if plain == nil then return serialize.None end
 
@@ -375,7 +377,7 @@ local function plainValue(plain: unknown, record: boolean): Value
 
   local fields = plain :: { [unknown]: unknown }
   if next(fields) == nil or fields[1] ~= nil then
-    return list(plain :: { unknown }, function(entry: unknown): Value return plainValue(entry, false) end)
+    return list(plain :: { unknown }, @native function(entry: unknown): Value return plainValue(entry, false) end)
   end
 
   local names: { string }, byName: { [string]: unknown } = {}, {}
