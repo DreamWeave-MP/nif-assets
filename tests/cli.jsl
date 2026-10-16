@@ -383,7 +383,7 @@ suite.describe('render', function()
     expect(string.find(text, '\n    code: no_root_nodes\n', 1, true) ~= nil).toBe(true)
     expect(string.find(text, '\n    record: null\n', 1, true) ~= nil).toBe(true)
     expect(string.find(text, '\n  stats: null\n', 1, true) ~= nil).toBe(true)
-    expect(string.find(text, 'wontLoad', 1, true)).toBeNil()
+    expect((string.find(text, 'wontLoad', 1, true))).toBeNil()
 
     -- JSON is one line and its line break; TOML has no null, so the field is left out.
     local line = cli.render(results.checked, { format = 'json' })
@@ -392,7 +392,7 @@ suite.describe('render', function()
     expect(string.sub(line, -2)).toBe '}\n'
     local document = cli.render(results.checked, { format = 'toml' })
     expect(select(2, string.gsub(document, 'stats', ''))).toBe(1)
-    expect(string.find(document, 'null', 1, true)).toBeNil()
+    expect((string.find(document, 'null', 1, true))).toBeNil()
   end)
 
   suite.it('writes an info with its scene graph, leaving out what a node doesn\'t have', function()
@@ -661,11 +661,11 @@ suite.describe('run', function()
     local rug = fs.join(root, 'meshes/rug.nif')
     local done, problem = fs.writeFile(rug, support.rug(), { atomic = true, createParents = true })
     if not done then error(problem, 0) end
-    local original = fs.readFileString(rug)
+    local original = readText(rug)
 
     expect(cli.run { '--format', 'json', 'fix', '--only', 'ncc', '--dry-run', rug }).toBe(0)
     expect(readText(rug)).toBe(original)
-    expect(fs.exists(rug .. '.bak')).toBe(false)
+    expect((fs.exists(rug .. '.bak'))).toBe(false)
 
     local folder = fs.join(root, 'fixed')
     local fixed = fs.join(folder, 'meshes/rug.nif')
@@ -677,9 +677,9 @@ suite.describe('run', function()
 
     -- Into the folder again backs up the earlier fix there, unless --no-backup.
     expect(cli.run { '--format', 'json', 'fix', '--output', folder, rug }).toBe(0)
-    expect(fs.exists(fixed .. '.bak')).toBe(true)
+    expect((fs.exists(fixed .. '.bak'))).toBe(true)
     expect(cli.run { '--format', 'json', 'fix', '--no-backup', '--output', folder, rug }).toBe(0)
-    expect(fs.exists(fixed .. '.bak1')).toBe(false)
+    expect((fs.exists(fixed .. '.bak1'))).toBe(false)
 
     expect(cli.run { '--format', 'json', 'fix', rug }).toBe(0)
     expect(readText(rug .. '.bak')).toBe(original)
@@ -687,7 +687,7 @@ suite.describe('run', function()
 
     -- Nothing is left to fix, so nothing more is backed up.
     expect(cli.run { '--format', 'json', 'fix', rug }).toBe(0)
-    expect(fs.exists(rug .. '.bak1')).toBe(false)
+    expect((fs.exists(rug .. '.bak1'))).toBe(false)
   end)
 
   suite.it('is 9 when the run fails: an input or a data folder that isn\'t there', function()

@@ -304,7 +304,7 @@ suite.describe('fix', function()
     local rug = fs.join(root, 'meshes/rug.nif')
     local succeeded, problem = fs.writeFile(rug, support.rug(), { atomic = true, createParents = true })
     if not succeeded then error(problem, 0) end
-    local original = fs.readFileString(rug)
+    local original = readText(rug)
 
     local dry = commands.fix { inputs = { rug }, only = { 'ncc' }, dryRun = true }
     expect(dry).toEqual {
@@ -355,7 +355,7 @@ suite.describe('fix', function()
     expect(again.report.files[1].written).toEqual { path = fixed, backup = fixed .. '.bak' }
     local plain = commands.fix { inputs = { rug }, only = { 'ncc' }, output = folder, backup = false }
     expect(plain.report.files[1].written).toEqual { path = fixed }
-    expect(fs.exists(fixed .. '.bak1')).toBe(false)
+    expect((fs.exists(fixed .. '.bak1'))).toBe(false)
 
     local inPlace = commands.fix { inputs = { rug }, only = { 'ncc' } }
     expect(inPlace.report.files[1].written).toEqual { path = rug, backup = rug .. '.bak' }
@@ -416,7 +416,7 @@ suite.describe('modify', function()
   suite.it('runs an edit on the NIF, and writes it if the edit changed it', function()
     local root = support.tree(Suite, 'modify', { ['rock.nif'] = support.node() })
     local file = fs.join(root, 'rock.nif')
-    local original = fs.readFileString(file)
+    local original = readText(file)
 
     local seen: { string } = {}
     local dry = commands.modify {
@@ -451,7 +451,7 @@ suite.describe('modify', function()
     local output = fs.join(root, 'out/meshes/rock.nif')
     local moved = commands.modify { input = file, edit = rename 'Moved', output = output }
     expect(moved.written).toEqual { path = output }
-    expect(fs.isFile(output)).toBe(true)
+    expect((fs.isFile(output))).toBe(true)
     expect(commands.dump({ input = output }).records[1].name).toBe 'Moved'
     expect(commands.dump({ input = file }).records[1].name).toBe 'Renamed'
   end)
@@ -468,7 +468,7 @@ suite.describe('modify', function()
     }
     expect(result.changed).toBe(false)
     expect(result.written).toBeNil()
-    expect(fs.exists(file .. '.bak')).toBe(false)
+    expect((fs.exists(file .. '.bak'))).toBe(false)
   end)
 
   suite.it('writes without a backup when told to', function()
@@ -476,7 +476,7 @@ suite.describe('modify', function()
     local file = fs.join(root, 'rock.nif')
     local result = commands.modify { input = file, edit = rename 'Renamed', backup = false }
     expect(result.written).toEqual { path = file }
-    expect(fs.exists(file .. '.bak')).toBe(false)
+    expect((fs.exists(file .. '.bak'))).toBe(false)
   end)
 
   suite.it('refuses another game\'s NIF, more than one, and one in an archive with nowhere to go', function()

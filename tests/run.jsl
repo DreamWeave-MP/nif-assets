@@ -1307,7 +1307,7 @@ suite.describe('fix', function()
     local root = mod 'fix-dry'
     local data = fs.join(root, 'mod')
     local file = fs.join(data, 'Meshes/x/defects.nif')
-    local before = fs.readFileString(file)
+    local before = readText(file)
     local report = assets.fix(assets.sources(nil, nil, { fs.join(data, 'Meshes') }), { dryRun = true })
     expect(report).toEqual {
       summary = {
@@ -1329,14 +1329,14 @@ suite.describe('fix', function()
       },
     }
     expect(readText(file)).toBe(before)
-    expect(fs.exists(file .. '.bak')).toBe(false)
+    expect((fs.exists(file .. '.bak'))).toBe(false)
   end)
 
   suite.it('writes over the file, backing it up first', function()
     local root = mod 'fix-backup'
     local data = fs.join(root, 'mod')
     local file = fs.join(data, 'Meshes/x/defects.nif')
-    local before = fs.readFileString(file)
+    local before = readText(file)
     expect(codes(file)).toEqual { 'visible_editor_marker', 'lowercase_ncc' }
 
     local report = assets.fix(assets.sources(nil, nil, { file }))
@@ -1371,7 +1371,7 @@ suite.describe('fix', function()
     local file = fs.join(root, 'mod/Meshes/x/defects.nif')
     local report = assets.fix(assets.sources(nil, nil, { file }), { backup = false })
     expect(report.files[1].written).toEqual { path = file }
-    expect(fs.exists(file .. '.bak')).toBe(false)
+    expect((fs.exists(file .. '.bak'))).toBe(false)
     expect(codes(file)).toEqual {}
   end)
 
@@ -1388,7 +1388,7 @@ suite.describe('fix', function()
     local root = mod 'fix-output'
     local data = fs.join(root, 'mod')
     local file = fs.join(data, 'Meshes/x/defects.nif')
-    local before = fs.readFileString(file)
+    local before = readText(file)
     local output = fs.join(root, 'fixed')
     local report = assets.fix(assets.sources(nil, nil, { file }), { output = output })
     local written = fs.join(output, 'meshes/x/defects.nif')
