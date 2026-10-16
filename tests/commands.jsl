@@ -10,6 +10,15 @@ local nif = require '@nif'
 local support = require './support'
 local test = require '@jess/test'
 
+--- The text of the file at `path`, raising the read's own message when there is none.
+local function readText(path: string): string
+  local text, problem = fs.readFileString(path)
+  if not text then error(problem, 0) end
+
+  return text
+end
+
+
 local expect = test.expect
 local suite = test.new()
 
@@ -314,7 +323,7 @@ suite.describe('fix', function()
         },
       },
     }
-    expect(fs.readFileString(rug)).toBe(original)
+    expect(readText(rug)).toBe(original)
 
     -- `check` points at the record `fix` changes: the string data, not the root.
     local checked = commands.check { inputs = { rug } }
@@ -331,7 +340,7 @@ suite.describe('fix', function()
     local fixed = fs.join(folder, 'meshes/rug.nif')
     expect(into.dryRun).toBe(false)
     expect(into.report.files[1].written).toEqual { path = fixed }
-    expect(fs.readFileString(rug)).toBe(original)
+    expect(readText(rug)).toBe(original)
     local fileBytes, problem = fs.readFile(fixed)
     if not fileBytes then error(problem, 0) end
 
@@ -350,8 +359,8 @@ suite.describe('fix', function()
 
     local inPlace = commands.fix { inputs = { rug }, only = { 'ncc' } }
     expect(inPlace.report.files[1].written).toEqual { path = rug, backup = rug .. '.bak' }
-    expect(fs.readFileString(rug .. '.bak')).toBe(original)
-    expect(fs.readFileString(rug) ~= original).toBe(true)
+    expect(readText(rug .. '.bak')).toBe(original)
+    expect(readText(rug) ~= original).toBe(true)
 
     -- Nothing is left to fix.
     local done = commands.fix { inputs = { rug }, only = { 'ncc' } }
@@ -429,13 +438,13 @@ suite.describe('modify', function()
       dryRun = true,
     }
     expect(seen).toEqual { file }
-    expect(fs.readFileString(file)).toBe(original)
+    expect(readText(file)).toBe(original)
 
     local result = commands.modify { input = file, edit = rename 'Renamed' }
     expect(result.changed).toBe(true)
     expect(result.dryRun).toBe(false)
     expect(result.written).toEqual { path = file, backup = file .. '.bak' }
-    expect(fs.readFileString(file .. '.bak')).toBe(original)
+    expect(readText(file .. '.bak')).toBe(original)
     expect(commands.dump({ input = file }).records[1].name).toBe 'Renamed'
 
     -- An output file's folders are made for it.

@@ -12,6 +12,15 @@ local nif = require '@nif'
 local test = require '@jess/test'
 local vfs = require '@vfs'
 
+--- The text of the file at `path`, raising the read's own message when there is none.
+local function readText(path: string): string
+  local text, problem = fs.readFileString(path)
+  if not text then error(problem, 0) end
+
+  return text
+end
+
+
 local expect = test.expect
 local suite = test.new()
 local scratch = assert(rawget(_G, 'scratchRoot') :: string?, 'the suite needs a host-owned scratchRoot')
@@ -1319,7 +1328,7 @@ suite.describe('fix', function()
         },
       },
     }
-    expect(fs.readFileString(file)).toBe(before)
+    expect(readText(file)).toBe(before)
     expect(fs.exists(file .. '.bak')).toBe(false)
   end)
 
@@ -1348,7 +1357,7 @@ suite.describe('fix', function()
         },
       },
     }
-    expect(fs.readFileString(file .. '.bak')).toBe(before)
+    expect(readText(file .. '.bak')).toBe(before)
     expect(codes(file)).toEqual {}
 
     -- Fixed, there is nothing left to fix, and nothing is written again.
@@ -1384,7 +1393,7 @@ suite.describe('fix', function()
     local report = assets.fix(assets.sources(nil, nil, { file }), { output = output })
     local written = fs.join(output, 'meshes/x/defects.nif')
     expect(report.files[1].written).toEqual { path = written }
-    expect(fs.readFileString(file)).toBe(before)
+    expect(readText(file)).toBe(before)
     expect(codes(written)).toEqual {}
   end)
 

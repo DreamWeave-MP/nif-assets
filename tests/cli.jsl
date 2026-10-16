@@ -13,6 +13,15 @@ local results = require './results'
 local support = require './support'
 local test = require '@jess/test'
 
+--- The text of the file at `path`, raising the read's own message when there is none.
+local function readText(path: string): string
+  local text, problem = fs.readFileString(path)
+  if not text then error(problem, 0) end
+
+  return text
+end
+
+
 local expect = test.expect
 local suite = test.new()
 
@@ -655,13 +664,13 @@ suite.describe('run', function()
     local original = fs.readFileString(rug)
 
     expect(cli.run { '--format', 'json', 'fix', '--only', 'ncc', '--dry-run', rug }).toBe(0)
-    expect(fs.readFileString(rug)).toBe(original)
+    expect(readText(rug)).toBe(original)
     expect(fs.exists(rug .. '.bak')).toBe(false)
 
     local folder = fs.join(root, 'fixed')
     local fixed = fs.join(folder, 'meshes/rug.nif')
     expect(cli.run { '--format', 'json', 'fix', '--only', 'ncc', '--output', folder, rug }).toBe(0)
-    expect(fs.readFileString(rug)).toBe(original)
+    expect(readText(rug)).toBe(original)
     local fileBytes, problem = fs.readFile(fixed)
     if not fileBytes then error(problem, 0) end
     expect((nif.open(fileBytes):record(0) :: { [string]: unknown }).value).toBe 'NCC'
@@ -673,8 +682,8 @@ suite.describe('run', function()
     expect(fs.exists(fixed .. '.bak1')).toBe(false)
 
     expect(cli.run { '--format', 'json', 'fix', rug }).toBe(0)
-    expect(fs.readFileString(rug .. '.bak')).toBe(original)
-    expect(fs.readFileString(rug)).toBe(fs.readFileString(fixed))
+    expect(readText(rug .. '.bak')).toBe(original)
+    expect(readText(rug)).toBe(readText(fixed))
 
     -- Nothing is left to fix, so nothing more is backed up.
     expect(cli.run { '--format', 'json', 'fix', rug }).toBe(0)
