@@ -37,14 +37,14 @@ type Regex = dream_bytes_Regex
 --- ranks private to `@nif`'s check (`src/internal/check/types.jsl`), which nothing exports: they
 --- are an order, not an object anything shares, and here they order a file's findings once its
 --- texture findings have joined the check's.
-local Ranks: { [string]: number } = table.freeze {
+local Ranks = table.freeze({
   wont_load = 1,
   broken = 2,
   missing_asset = 3,
   collision = 4,
   performance = 5,
   info = 6,
-}
+} :: { [string]: number })
 
 --- A NIF to read: its VFS path, the data folder, archive, or file it came from, and the layer
 --- it's read from (an input's index, 0 for the load order, -1 for a lone file).
@@ -450,6 +450,9 @@ end
 export type FindingReport = { severity: string, code: string, message: string, record: number? }
 
 export type TextureReport = { path: string, resolved: string?, source: string? }
+
+--- What a file holds, counted.
+export type Stats = Check.Stats
 
 export type FileReport = {
   path: string,
@@ -861,11 +864,12 @@ local function gamebryoRecords(
     if pattern and (type(name) ~= 'string' or not pattern:isMatch(name)) then continue end
 
     if options.list then
-      table.insert(records, {
+      local listed: { [string]: unknown } = {
         index = index,
         type = typeName,
         name = if type(name) == 'string' and name ~= '' then name else nil,
-      })
+      }
+      table.insert(records, listed)
       continue
     end
 
@@ -887,8 +891,10 @@ local function dump(made: Sources, target: Target, options: DumpOptions?): Dump
   local settings: DumpOptions = options or {}
   local pattern: Regex? = nil
   if settings.name then
+    local caseInsensitive: { caseInsensitive: boolean?, unicode: boolean?, multiLine: boolean?, dotAll: boolean? } =
+      { caseInsensitive = true }
     -- `bytes.regex` throws for a pattern Rust's regex crate rejects, with its reason.
-    local compiled, regex = pcall(bytes.regex, settings.name, { caseInsensitive = true })
+    local compiled, regex = pcall(bytes.regex, settings.name, caseInsensitive)
     if not compiled then error(`invalid name regex: {regex}`, 0) end
 
     pattern = regex

@@ -42,6 +42,12 @@ export type CheckRequest = {
   everyFile: boolean?,
 }
 
+--- The report of one file a check, an info, or a fix ran over, as the results hold them.
+export type FileReport = assets.FileReport
+export type InfoReport = assets.InfoReport
+export type FixedFile = assets.FixedFile
+export type Stats = assets.Stats
+
 --- `report.summary` counts every file checked, whatever `show` left out of `report.files`.
 export type CheckResult = { command: 'check', report: assets.CheckReport }
 

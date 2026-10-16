@@ -12,7 +12,7 @@ list is a list.
 
 --- The array kinds whose elements `toTable` hands over as a `vector` with only two components
 --- set: texture coordinates, and a vertex with its weight.
-local Pairs: { [string]: boolean } = table.freeze { vec2 = true, u16f32 = true }
+local Pairs = table.freeze({ vec2 = true, u16f32 = true } :: { [string]: boolean })
 
 --- What every `@nif` array view answers to.
 type View = { kind: string, toTable: (self: View) -> { unknown } }

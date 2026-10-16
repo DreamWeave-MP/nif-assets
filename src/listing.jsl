@@ -18,7 +18,7 @@ type Value = serialize.Value
 local MaxInlineWidth = 100
 
 --- Words a YAML reader may take for something other than a string when they aren't quoted.
-local Reserved: { [string]: boolean } = table.freeze {
+local Reserved = table.freeze({
   ['true'] = true,
   ['false'] = true,
   null = true,
@@ -33,7 +33,7 @@ local Reserved: { [string]: boolean } = table.freeze {
   ['~'] = true,
   ['='] = true,
   ['<<'] = true,
-}
+} :: { [string]: boolean })
 
 local Scratch = buffer.create(4)
 

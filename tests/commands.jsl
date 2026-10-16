@@ -332,6 +332,8 @@ suite.describe('fix', function()
       if found.code == 'lowercaseNcc' then finding = found end
     end
 
+    if not finding then error('the check found no lowercaseNcc', 0) end
+
     expect(finding.record).toBe(dry.report.files[1].fixes[1].record)
     expect(finding.record).toBe(0)
 

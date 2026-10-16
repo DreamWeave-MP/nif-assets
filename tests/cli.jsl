@@ -183,9 +183,9 @@ suite.describe('parse', function()
       request = { inputs = { 'mod' }, show = 'missingAsset' },
     }
 
-    for flag, level in
+    local levels: { [string]: string } =
       { broken = 'broken', collision = 'collision', performance = 'performance', info = 'info' }
-    do
+    for flag, level in levels do
       expect(parsed { 'check', '--show', flag, 'mod' }).toEqual {
         action = 'check',
         format = 'yaml',
@@ -496,7 +496,7 @@ suite.describe('render', function()
         records = { { value = value } },
       }
 
-      return (string.match(cli.render(result), '\n%- value: ([^\n]*)\n$'))
+      return string.match(cli.render(result), '\n%- value: ([^\n]*)\n$') or error('the dump rendered no value', 0)
     end
 
     local narrow = buffer.create(4)

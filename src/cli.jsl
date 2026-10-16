@@ -63,14 +63,14 @@ local Verbose: Flag = { name = 'verbose' }
 local Types: Flag = { name = 'types', missing = 'a record type', repeated = true }
 
 --- The flags every command takes.
-local Shared: { [string]: Flag } = table.freeze {
+local Shared = table.freeze({
   ['--format'] = { name = 'format', missing = 'a format' },
   ['--help'] = { name = 'help' },
   ['-h'] = { name = 'help' },
-}
+} :: { [string]: Flag })
 
 --- Each command's own flags.
-local Flags: { [string]: { [string]: Flag } } = table.freeze {
+local Flags = table.freeze({
   check = {
     ['--show'] = { name = 'show', missing = 'a severity' },
     ['--verbose'] = Verbose,
@@ -96,43 +96,43 @@ local Flags: { [string]: { [string]: Flag } } = table.freeze {
     ['--output'] = { name = 'output', missing = 'a folder' },
     ['--data'] = Data,
   },
-}
+} :: { [string]: { [string]: Flag } })
 
 --- `--show`'s values, and the severity each names.
-local Levels: { [string]: commands.Level } = table.freeze {
+local Levels = table.freeze({
   ['wont-load'] = 'wontLoad' :: commands.Level,
   broken = 'broken' :: commands.Level,
   ['missing-asset'] = 'missingAsset' :: commands.Level,
   collision = 'collision' :: commands.Level,
   performance = 'performance' :: commands.Level,
   info = 'info' :: commands.Level,
-}
+} :: { [string]: commands.Level })
 
 --- `--only`'s values, and the fix each names.
-local Fixes: { [string]: Fix.Kind } = table.freeze {
+local Fixes = table.freeze({
   rcn = 'rcn' :: Fix.Kind,
   ncc = 'ncc' :: Fix.Kind,
   markers = 'markers' :: Fix.Kind,
   ['skin-weights'] = 'skinWeights' :: Fix.Kind,
   unreachable = 'unreachable' :: Fix.Kind,
-}
+} :: { [string]: Fix.Kind })
 
-local Formats: { [string]: Format } = table.freeze {
+local Formats = table.freeze({
   yaml = 'yaml' :: Format,
   json = 'json' :: Format,
   toml = 'toml' :: Format,
-}
+} :: { [string]: Format })
 
 --- What a command asks for when it is given no input.
-local Inputs: { [string]: string } = table.freeze {
+local Inputs = table.freeze({
   check = 'check requires at least one input: a NIF or KF file, a data folder, or an archive',
   info = 'info requires at least one input: a NIF or KF file, a data folder, or an archive',
   fix = 'fix requires at least one input: a NIF or KF file, a data folder, or an archive',
   dump = 'dump requires a NIF or KF file, or its VFS path in a --data folder or archive',
-}
+} :: { [string]: string })
 
 --- The commands that aren't run, and why.
-local Refused: { [string]: string } = table.freeze {
+local Refused = table.freeze({
   modify = 'modify can\'t run: a package can\'t load a Luau script it is handed when it runs, so'
     .. ' there is nothing to give --script to. @nif-assets/commands\' modify takes the edit as a'
     .. ' function; a script of your own, run with jess run, requires it and passes the edit in',
@@ -140,7 +140,7 @@ local Refused: { [string]: string } = table.freeze {
     .. ' and this command generates none',
   man = 'man isn\'t a command of nif-assets: man pages were jess\'s own, and this command'
     .. ' generates none; nif-assets --help and nif-assets <command> --help describe it',
-}
+} :: { [string]: string })
 
 local function out(text: string) process.write('stdout', text) end
 
@@ -346,12 +346,12 @@ local function parseFix({flags, positional}: Given, format: Format): (Command?, 
   return { action = 'fix' :: 'fix', format = format, request = request }, nil
 end
 
-local Parsers: { [string]: (given: Given, format: Format) -> (Command?, string?) } = table.freeze {
+local Parsers = table.freeze({
   check = parseCheck,
   info = parseInfo,
   dump = parseDump,
   fix = parseFix,
-}
+} :: { [string]: (given: Given, format: Format) -> (Command?, string?) })
 
 --- `help [<command>]`: the usage of the whole command, or of one of its commands.
 local function parseHelp(argv: { string }, first: number): (Command?, string?)

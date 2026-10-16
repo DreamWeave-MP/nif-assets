@@ -5,7 +5,7 @@
 -- `tests/golden/` holds the document each one renders to.
 local commands = require '@nif-assets/commands'
 
-local Stats = table.freeze {
+local Stats: commands.Stats = {
   records = 1,
   reachableRecords = 1,
   nodes = 0,

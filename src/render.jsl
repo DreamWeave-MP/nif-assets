@@ -139,7 +139,7 @@ local function check(result: commands.CheckResult): Value
     },
     {
       'files',
-      list(result.report.files, function(file): Value
+      list(result.report.files, function(file: commands.FileReport): Value
         return serialize.struct {
           { 'path', file.path },
           { 'source', file.source },
@@ -256,7 +256,7 @@ local function info(result: commands.InfoResult): Value
   return serialize.struct {
     {
       'files',
-      list(result.files, function(file): Value
+      list(result.files, function(file: commands.InfoReport): Value
         local collision: Value = serialize.None
         local found = file.collision
         if found then
@@ -307,7 +307,7 @@ local function fix(result: commands.FixResult): Value
     },
     {
       'files',
-      list(result.report.files, function(file): Value
+      list(result.report.files, function(file: commands.FixedFile): Value
         local written = file.written
         return serialize.struct {
           { 'path', file.path },
