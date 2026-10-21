@@ -4,7 +4,7 @@
 --[[
 `check`, `info`, and `fix` over many NIFs at once, with each NIF's textures looked up the way
 OpenMW finds them: a port of jess-assets' NIF reports. NIFs come from sources: files, data
-folders, and archives given as inputs, and a load order's VFS (an `@openmw` Context's `vfs()`)
+folders, and archives given as inputs, and a load order's VFS (an `@openmw-install` Context's `vfs()`)
 underneath them, where textures are looked up too. A file inside a `meshes` folder brings that
 folder's data folder along, so its textures resolve against its own mod. `dump` and `edit` read
 one of those NIFs: its records as plain data, and the model to change it through.
