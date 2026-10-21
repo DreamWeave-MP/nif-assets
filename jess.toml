@@ -10,7 +10,7 @@ tests = ["tests/run.jsl", "tests/commands.jsl", "tests/cli.jsl", "tests/style.js
 
 [dependencies]
 "org.dreamweave.nif" = "0.1"
-"org.dreamweave.vfs" = "0.1"
+"org.dreamweave.vfs" = "2"
 
 # The suite packs its archive with the archive module directly.
 [dev-dependencies]
