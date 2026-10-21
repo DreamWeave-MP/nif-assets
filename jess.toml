@@ -14,7 +14,7 @@ tests = ["tests/run.jsl", "tests/commands.jsl", "tests/cli.jsl", "tests/style.js
 
 # The suite packs its archive with the archive module directly.
 [dev-dependencies]
-"org.dreamweave.dream-archive" = "0.1"
+"org.dreamweave.dream-archive" = "2"
 
 [modules]
 "@nif-assets" = "src/init.jsl"
