@@ -19,3 +19,11 @@ jess = "org.dreamweave.nif-assets"
 version = "0.1.0"
 date = 2026-10-21
 summary = "First release published as a DreamWeave project."
+
+[[releases]]
+version = "0.1.1"
+date = 2026-10-24
+summary = "A report on a whole mods folder no longer fails with `table overflow`: it is written a file at a time."
+fixed = [
+    "`check`, `info` and `fix` write their report to standard output a file at a time, as the same text, so a run over tens of thousands of NIFs never builds its whole document as one string. Needs jess 0.2.2 or later, whose YAML and JSON writers no longer overflow a table on a document of millions of lines.",
+]
