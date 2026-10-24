@@ -122,10 +122,16 @@ local function texture({path, resolved, source}: Texture): Value
   }
 end
 
-local function check(result: commands.CheckResult): Value
-  local summary = result.report.summary
-  return serialize.struct {
-    {
+--- A document whose last field is `files`, written an entry at a time: the fields before it
+--- (none, or `summary`), how many files there are, and each file's entry, made when it is written.
+--- A run over a whole mods folder reports on tens of thousands of files, and its document can be
+--- bigger than the longest string Luau holds (1 GiB), so it never exists as one.
+type Document = { fields: { { unknown } }, count: number, entry: (number) -> Value }
+
+local function check(result: commands.CheckResult): Document
+  local summary, files = result.report.summary, result.report.files
+  return {
+    fields = { {
       'summary',
       serialize.struct {
         { 'textures_checked', summary.texturesChecked },
@@ -136,33 +142,32 @@ local function check(result: commands.CheckResult): Value
         { 'by_worst_severity', counts(summary.byWorstSeverity) },
         { 'by_code', counts(summary.byCode) },
       },
-    },
-    {
-      'files',
-      list(result.report.files, function(file: commands.FileReport): Value
-        return serialize.struct {
-          { 'path', file.path },
-          { 'source', file.source },
-          { 'version', file.version },
-          { 'game', file.game },
-          { 'deeply_checked', file.deeplyChecked },
-          { 'worst', if file.worst then snake(file.worst) else nil },
-          {
-            'findings',
-            list(file.findings, function({severity, code, message, record}): Value
-              return serialize.struct {
-                { 'severity', snake(severity) },
-                { 'code', snake(code) },
-                { 'message', message },
-                { 'record', record },
-              }
-            end),
-          },
-          { 'textures', list(file.textures, texture) },
-          { 'stats', stats(file.stats) },
-        }
-      end),
-    },
+    } },
+    count = #files,
+    entry = function(index: number): Value
+      local file = files[index]
+      return serialize.struct {
+        { 'path', file.path },
+        { 'source', file.source },
+        { 'version', file.version },
+        { 'game', file.game },
+        { 'deeply_checked', file.deeplyChecked },
+        { 'worst', if file.worst then snake(file.worst) else nil },
+        {
+          'findings',
+          list(file.findings, function({severity, code, message, record}): Value
+            return serialize.struct {
+              { 'severity', snake(severity) },
+              { 'code', snake(code) },
+              { 'message', message },
+              { 'record', record },
+            }
+          end),
+        },
+        { 'textures', list(file.textures, texture) },
+        { 'stats', stats(file.stats) },
+      }
+    end,
   }
 end
 
@@ -252,50 +257,51 @@ local function treeNode(node: TreeNode): Value
   return serialize.struct(fields)
 end
 
-local function info(result: commands.InfoResult): Value
-  return serialize.struct {
-    {
-      'files',
-      list(result.files, function(file: commands.InfoReport): Value
-        local collision: Value = serialize.None
-        local found = file.collision
-        if found then
-          local fields: { { unknown } } = {
-            { 'source', snake(found.source) },
-            { 'node', found.node },
-            { 'hides_markers', found.hidesMarkers },
-          }
-
-          if found.bsxFlags then table.insert(fields, { 'bsx_flags', found.bsxFlags }) end
-
-          collision = serialize.struct(fields)
-        end
-
-        return serialize.struct {
-          { 'path', file.path },
-          { 'source', file.source },
-          { 'version', file.version },
-          { 'game', file.game },
-          { 'user_version', file.userVersion },
-          { 'beth_version', file.bethVersion },
-          { 'author', file.author },
-          { 'record_count', file.recordCount },
-          { 'record_types', tally(file.recordTypes) },
-          { 'error', file.error },
-          { 'collision', collision },
-          { 'stats', stats(file.stats) },
-          { 'textures', list(file.textures, texture) },
-          { 'tree', list(file.tree, treeNode) },
+local function info(result: commands.InfoResult): Document
+  local files = result.files
+  return {
+    fields = {},
+    count = #files,
+    entry = function(index: number): Value
+      local file = files[index]
+      local collision: Value = serialize.None
+      local found = file.collision
+      if found then
+        local fields: { { unknown } } = {
+          { 'source', snake(found.source) },
+          { 'node', found.node },
+          { 'hides_markers', found.hidesMarkers },
         }
-      end),
-    },
+
+        if found.bsxFlags then table.insert(fields, { 'bsx_flags', found.bsxFlags }) end
+
+        collision = serialize.struct(fields)
+      end
+
+      return serialize.struct {
+        { 'path', file.path },
+        { 'source', file.source },
+        { 'version', file.version },
+        { 'game', file.game },
+        { 'user_version', file.userVersion },
+        { 'beth_version', file.bethVersion },
+        { 'author', file.author },
+        { 'record_count', file.recordCount },
+        { 'record_types', tally(file.recordTypes) },
+        { 'error', file.error },
+        { 'collision', collision },
+        { 'stats', stats(file.stats) },
+        { 'textures', list(file.textures, texture) },
+        { 'tree', list(file.tree, treeNode) },
+      }
+    end,
   }
 end
 
-local function fix(result: commands.FixResult): Value
-  local summary = result.report.summary
-  return serialize.struct {
-    {
+local function fix(result: commands.FixResult): Document
+  local summary, files = result.report.summary, result.report.files
+  return {
+    fields = { {
       'summary',
       serialize.struct {
         { 'files', summary.files },
@@ -304,34 +310,33 @@ local function fix(result: commands.FixResult): Value
         { 'skipped', summary.skipped },
         { 'by_fix', counts(summary.byFix) },
       },
-    },
-    {
-      'files',
-      list(result.report.files, function(file: commands.FixedFile): Value
-        local written = file.written
-        return serialize.struct {
-          { 'path', file.path },
-          { 'source', file.source },
-          {
-            'fixes',
-            list(file.fixes, function(fixed): Value
-              return serialize.struct {
-                { 'fix', snake(fixed.fix) },
-                { 'message', fixed.message },
-                { 'record', fixed.record },
-              }
-            end),
-          },
-          {
-            'written',
-            if written
-              then serialize.struct { { 'path', written.path }, { 'backup', written.backup } }
-              else nil,
-          },
-          { 'skipped', file.skipped },
-        }
-      end),
-    },
+    } },
+    count = #files,
+    entry = function(index: number): Value
+      local file = files[index]
+      local written = file.written
+      return serialize.struct {
+        { 'path', file.path },
+        { 'source', file.source },
+        {
+          'fixes',
+          list(file.fixes, function(fixed): Value
+            return serialize.struct {
+              { 'fix', snake(fixed.fix) },
+              { 'message', fixed.message },
+              { 'record', fixed.record },
+            }
+          end),
+        },
+        {
+          'written',
+          if written
+            then serialize.struct { { 'path', written.path }, { 'backup', written.backup } }
+            else nil,
+        },
+        { 'skipped', file.skipped },
+      }
+    end,
   }
 end
 
@@ -420,52 +425,100 @@ end
 
 --- A dump: its header, then `records`. In YAML the records are written by jess's own list
 --- writer, as `jess nif dump` streamed them.
-local function dump(result: commands.DumpResult, format: Format): string
+local function dump(result: commands.DumpResult, format: Format, write: (string) -> ())
   local header = dumpHeader(result, format)
-  local records = table.create(#result.records) :: { Value }
-  for index, record in result.records do
-    records[index] = plainValue(record, true)
-  end
-
   if format ~= 'yaml' then
+    local records = table.create(#result.records) :: { Value }
+    for index, record in result.records do
+      records[index] = plainValue(record, true)
+    end
+
     serialize.set(header, 'records', serialize.array(records))
-    return serialize.encode(header, format) .. (if format == 'json' then '\n' else '')
+    write(serialize.encode(header, format) .. (if format == 'json' then '\n' else ''))
+    return
   end
 
-  local out = { serialize.encode(header, 'yaml') }
-  if #records == 0 then
-    table.insert(out, 'records: []\n')
-    return table.concat(out)
+  write(serialize.encode(header, 'yaml'))
+  if #result.records == 0 then
+    write 'records: []\n'
+    return
   end
 
-  table.insert(out, 'records:\n')
-  for _, record in records do
-    table.insert(out, listing.item(record))
+  write 'records:\n'
+  for _, record in result.records do
+    write(listing.item(plainValue(record, true)))
   end
-
-  return table.concat(out)
 end
 
---- A result's document as a value, for every command whose document serde wrote whole.
-local function document(result: commands.Result): Value
-  if result.command == 'check' then return check(result) end
+--- A value as the document serde wrote for it: JSON gains its line break here.
+local function encoded(value: Value, format: Format): string
+  local text = serialize.encode(value, format)
+  return if format == 'json' then `{text}\n` else text
+end
 
-  if result.command == 'info' then return info(result) end
+--- A streamed document, written as the same text it is as one value. Every format writes `files`
+--- last and its entries one after another, so an entry is encoded alone, as a list of one: YAML
+--- writes a mapping's list at the mapping's own indentation, and TOML separates each `[[files]]`
+--- from what came before with a blank line. The one exception is a document with no files, which
+--- is small, and which TOML writes as `files = []` ahead of `[summary]`: that is written whole.
+local function streamed(found: Document, format: Format, write: (string) -> ())
+  local fields = found.fields
+  if found.count == 0 then
+    local whole = table.clone(fields)
+    table.insert(whole, { 'files', serialize.array {} })
+    write(encoded(serialize.struct(whole), format))
+    return
+  end
 
-  if result.command == 'fix' then return fix(result) end
+  local head = if #fields > 0 then serialize.encode(serialize.struct(fields), format) else nil
+  if format == 'json' then
+    -- The head's closing brace becomes the files' opening.
+    write(if head then `{string.sub(head, 1, -2)},"files":[` else '{"files":[')
+    for index = 1, found.count do
+      local entry = serialize.encode(found.entry(index), 'json')
+      write(if index > 1 then `,{entry}` else entry)
+    end
 
-  if result.command == 'modify' then return modify(result) end
+    write ']}\n'
+    return
+  end
 
-  return error(`no document for a {result.command} result`, 0)
+  if head then write(head) end
+
+  if format == 'yaml' then write 'files:\n' end
+
+  for index = 1, found.count do
+    local entry = serialize.array { found.entry(index) }
+    if format == 'yaml' then
+      write(serialize.encode(entry, 'yaml'))
+    else
+      local section = serialize.encode(serialize.struct { { 'files', entry } }, 'toml')
+      write(if head or index > 1 then `\n{section}` else section)
+    end
+  end
+end
+
+--- Writes the result, a piece at a time, as the text the original printed for it, in `format`
+--- (YAML without one). A report's files are written as they are encoded, so a run over thousands
+--- of files never holds its document whole.
+local function write(result: commands.Result, format: Format?, writer: (string) -> ())
+  local chosen: Format = format or 'yaml'
+  if result.command == 'dump' then return dump(result, chosen, writer) end
+
+  if result.command == 'modify' then return writer(encoded(modify(result), chosen)) end
+
+  if result.command == 'check' then return streamed(check(result), chosen, writer) end
+
+  if result.command == 'info' then return streamed(info(result), chosen, writer) end
+
+  return streamed(fix(result), chosen, writer)
 end
 
 --- The result as the text the original printed for it, in `format` (YAML without one).
 local function render(result: commands.Result, format: Format?): string
-  local chosen: Format = format or 'yaml'
-  if result.command == 'dump' then return dump(result, chosen) end
-
-  local text = serialize.encode(document(result), chosen)
-  return if chosen == 'json' then `{text}\n` else text
+  local pieces: { string } = {}
+  write(result, format, function(piece: string) table.insert(pieces, piece) end)
+  return table.concat(pieces)
 end
 
-return table.freeze { render = render }
+return table.freeze { render = render, write = write }

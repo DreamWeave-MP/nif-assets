@@ -496,19 +496,22 @@ local function run(argv: { string }): number
   end
 
   -- A command raises for a request it can't carry out at all (an input that isn't there, a
-  -- dump of more than one file, a regex that doesn't compile), and the serializer raises for a
-  -- value TOML can't hold.
-  local done, result, text = pcall(function(): (commands.Result, string)
-    local made = execute(command)
-    return made, render(made, { format = command.format })
-  end)
-
-  if not done then
+  -- dump of more than one file, a regex that doesn't compile).
+  local ran, result = pcall(execute, command)
+  if not ran then
     err(`nif-assets: {result}`)
     return Exit.runtime
   end
 
-  out(text)
+  -- The serializer raises for a value TOML can't hold. The document goes out a file at a time,
+  -- since a report on a whole mods folder can be more text than one string holds, so what was
+  -- written before such a value stays written.
+  local written, problem = pcall(rendering.write, result, command.format, out)
+  if not written then
+    err(`nif-assets: {problem}`)
+    return Exit.runtime
+  end
+
   local found = complaint(result)
   if found then err(`nif-assets: {found}`) end
 
