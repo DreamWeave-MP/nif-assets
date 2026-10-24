@@ -1,0 +1,17 @@
+files = []
+
+[summary]
+textures_checked = true
+load_order_checked = false
+files = 3
+deeply_checked = 2
+wont_load = 1
+
+[summary.by_worst_severity]
+missing_asset = 1
+wont_load = 1
+
+[summary.by_code]
+lowercase_ncc = 1
+missing_texture = 1
+no_root_nodes = 1

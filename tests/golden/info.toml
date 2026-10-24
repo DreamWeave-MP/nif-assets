@@ -1,0 +1,121 @@
+[[files]]
+path = "meshes/rock.nif"
+source = "/mods/rock"
+version = "4.0.0.2"
+game = "Morrowind"
+user_version = 0
+record_count = 5
+
+[files.record_types]
+NiNode = 2
+NiStringExtraData = 1
+NiTriShape = 1
+NiTriShapeData = 1
+
+[files.collision]
+source = "root_collision_node"
+node = 4
+hides_markers = false
+
+[files.stats]
+records = 1
+reachable_records = 1
+nodes = 0
+shapes = 0
+vertices = 0
+triangles = 0
+collision_triangles = 0
+controllers = 0
+embedded_textures = 0
+embedded_texture_bytes = 0
+skinned = false
+
+[[files.textures]]
+path = "tx_rock.tga"
+resolved = "textures/tx_rock.dds"
+source = "/mods/rock"
+
+[[files.tree]]
+index = 0
+type = "NiNode"
+name = "Rock"
+
+[[files.tree.controllers]]
+index = 7
+type = "NiKeyframeController"
+active = true
+
+[[files.tree.effects]]
+index = 9
+type = "NiTextureEffect"
+
+[[files.tree.extra_data]]
+index = 1
+type = "NiStringExtraData"
+value = "NCC"
+
+[[files.tree.extra_data]]
+index = 8
+type = "NiExtraData"
+
+[[files.tree.children]]
+index = 2
+type = "NiTriShape"
+name = "Tri Rock"
+
+[[files.tree.children.properties]]
+index = 5
+type = "NiTexturingProperty"
+
+[files.tree.children.shape]
+vertices = 3
+triangles = 1
+skin = 6
+
+[files.tree.children.shape.data]
+index = 3
+type = "NiTriShapeData"
+
+[[files.tree.children]]
+index = 4
+type = "RootCollisionNode"
+name = ""
+hidden = true
+
+[[files.tree.children]]
+index = 10
+type = "NiTriShape"
+name = "Bare"
+
+[files.tree.children.shape]
+vertices = 0
+triangles = 0
+
+[[files]]
+path = "meshes/skyrim.nif"
+source = "/mods/rock"
+version = "20.2.0.7"
+game = "Skyrim"
+user_version = 12
+beth_version = 83
+author = "author"
+record_count = 1
+error = "Unknown record type XiNode"
+textures = []
+
+[files.record_types]
+XiNode = 1
+
+[files.collision]
+source = "none"
+hides_markers = true
+bsx_flags = 34
+
+[[files.tree]]
+index = 0
+type = "NiNode"
+name = "Scene Root"
+
+[files.tree.collision]
+index = 1
+type = "bhkCollisionObject"

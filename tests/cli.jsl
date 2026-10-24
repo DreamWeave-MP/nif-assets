@@ -409,6 +409,17 @@ suite.describe('render', function()
     expect(cli.render(results.fixed, { format = 'toml' })).toBe(golden 'fix.toml')
   end)
 
+  -- A report is written a file at a time, never whole; these goldens were written whole, by the
+  -- renderer before it streamed.
+  suite.it('writes a report a file at a time as the document it is whole', function()
+    expect(cli.render(results.described, { format = 'toml' })).toBe(golden 'info.toml')
+    expect(cli.render(results.fixed, { format = 'json' })).toBe(golden 'fix.json')
+    expect(cli.render(results.checkedNone)).toBe(golden 'check-empty.yaml')
+    expect(cli.render(results.checkedNone, { format = 'json' })).toBe(golden 'check-empty.json')
+    expect(cli.render(results.checkedNone, { format = 'toml' })).toBe(golden 'check-empty.toml')
+    expect(cli.render(results.describedNone, { format = 'toml' })).toBe(golden 'info-empty.toml')
+  end)
+
   suite.it('writes a modify result, with dry_run only on a dry run', function()
     expect(cli.render(results.modified)).toBe(golden 'modify.yaml')
 

@@ -188,9 +188,19 @@ local Dumped: commands.DumpResult = {
   },
 }
 
+--- Reports over no files. TOML writes an empty `files` ahead of everything else.
+local CheckedNone: commands.CheckResult = {
+  command = 'check',
+  report = { summary = Checked.report.summary, files = {} },
+}
+
+local DescribedNone: commands.InfoResult = { command = 'info', files = {} }
+
 return table.freeze {
   checked = Checked,
+  checkedNone = CheckedNone,
   described = Described,
+  describedNone = DescribedNone,
   fixed = Fixed,
   modified = Modified,
   dumped = Dumped,
